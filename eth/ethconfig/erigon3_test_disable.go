@@ -4,3 +4,5 @@ package ethconfig
 
 const EnableHistoryV3InTest = false
 const EnableHistoryV4InTest = false
+
+var EnableStateless = false

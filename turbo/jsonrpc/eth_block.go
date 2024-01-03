@@ -68,7 +68,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 			}
 		}
 		if txn == nil {
-			return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645
+			return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 		}
 		txs = append(txs, txn)
 	}

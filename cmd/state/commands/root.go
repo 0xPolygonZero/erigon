@@ -1,14 +1,18 @@
 package commands
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/turbo/debug"
@@ -30,6 +34,24 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&genesisPath, "genesis", "", "path to genesis.json file")
 }
 
+func rootContext() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		ch := make(chan os.Signal, 1)
+		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+		defer signal.Stop(ch)
+
+		select {
+		case <-ch:
+			log.Info("Got interrupt, shutting down...")
+		case <-ctx.Done():
+		}
+
+		cancel()
+	}()
+	return ctx
+}
+
 var rootCmd = &cobra.Command{
 	Use:   "state",
 	Short: "state is a utility for Stateless ethereum clients",
@@ -38,7 +60,7 @@ var rootCmd = &cobra.Command{
 		if genesisPath != "" {
 			genesis = genesisFromFile(genesisPath)
 		}
-		if genesis.Config != nil && genesis.Config.ChainID.Cmp(chainConfig.ChainID) != 0 {
+		if genesisPath == "" && genesis.Config != nil && genesis.Config.ChainID.Cmp(chainConfig.ChainID) != 0 {
 			utils.Fatalf("provided genesis.json chain configuration is invalid: expected chainId to be %v, got %v",
 				chainConfig.ChainID.String(), genesis.Config.ChainID.String())
 		}

@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -1295,6 +1296,65 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	code2, err := r.ReadAccountCode(contract, 1, codeHash)
 	assert.NoError(t, err, "you can receive the new code")
 	assert.Equal(t, code, code2, "new code should be received")
+}
+
+func TestTDSWitness(t *testing.T) {
+	contract := libcommon.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
+	sKey := libcommon.HexToHash("0x4321")
+	sValue := uint256.NewInt(0xdeadbeef)
+
+	_, tx := memdb.NewTestTx(t)
+
+	tds := state.NewTrieDbState(libcommon.Hash{}, tx, 0)
+
+	w := tds.DbStateWriter()
+
+	intraBlockState := state.New(tds)
+
+	tds.StartNewBuffer()
+
+	tds.SetResolveReads(false)
+
+	// Start the 1st transaction
+	intraBlockState.CreateAccount(contract, true)
+
+	code := []byte{0x01, 0x02, 0x03, 0x04}
+
+	intraBlockState.SetCode(contract, code)
+	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
+	intraBlockState.SetState(contract, &sKey, *sValue)
+	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tds.TrieStateWriter()); err != nil {
+		t.Errorf("error finalising 1st tx: %v", err)
+	}
+	if err := intraBlockState.CommitBlock(&chain.Rules{}, w); err != nil {
+		t.Errorf("error committing block: %v", err)
+	}
+
+	_, err := tds.ResolveStateTrie(false, false)
+
+	if err != nil {
+		t.Errorf("error resolving state trie: %v", err)
+	}
+
+	roots, err := tds.UpdateStateTrie()
+
+	fmt.Printf("Root: %x\n", roots[0])
+
+	if err != nil {
+		t.Errorf("error updating trie roots: %v", err)
+	}
+
+	bw, err := tds.ExtractWitness(false, false)
+
+	if err != nil {
+		t.Errorf("error extracting witness: %v", err)
+	}
+
+	buffer := &bytes.Buffer{}
+
+	bw.WriteInto(buffer)
+
+	fmt.Printf("Witness: %x\n", buffer.Bytes())
 }
 
 // TestCacheCodeSizeInTrie makes sure that we dont just read from the DB all the time

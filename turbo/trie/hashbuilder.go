@@ -373,6 +373,9 @@ func (hb *HashBuilder) extension(key []byte) error {
 	switch n := nd.(type) {
 	case nil:
 		branchHash := libcommon.CopyBytes(hb.hashStack[len(hb.hashStack)-length2.Hash:])
+		if bytes.Equal(branchHash, libcommon.FromHex("0x1877400b4e918c1358c624c51823877f75387defc9230c14de0336655ae45720")) {
+			fmt.Printf("Here %x\n", key)
+		}
 		s = &shortNode{Key: libcommon.CopyBytes(key), Val: hashNode{hash: branchHash}}
 	case *fullNode:
 		s = &shortNode{Key: libcommon.CopyBytes(key), Val: n}
@@ -486,6 +489,9 @@ func (hb *HashBuilder) branch(set uint16) error {
 		if ((1 << digit) & set) != 0 {
 			if nodes[i] == nil {
 				f.Children[digit] = hashNode{hash: libcommon.CopyBytes(hashes[hashStackStride*i+1 : hashStackStride*(i+1)])}
+				if bytes.Equal(hashes[hashStackStride*i+1:hashStackStride*(i+1)], libcommon.FromHex("0x1877400b4e918c1358c624c51823877f75387defc9230c14de0336655ae45720")) {
+					fmt.Printf("Here\n")
+				}
 			} else {
 				f.Children[digit] = nodes[i]
 			}

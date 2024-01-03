@@ -2,12 +2,20 @@ package jsonrpc
 
 import (
 	"context"
+	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon/cmd/state/stateless"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
@@ -15,13 +23,11 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
-	"github.com/ledgerwatch/log/v3"
 
 	jsoniter "github.com/json-iterator/go"
 )
@@ -109,6 +115,8 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		txns = append(txns, borTx)
 	}
 
+	cumulativeGas := uint64(0)
+
 	for idx, txn := range txns {
 		stream.WriteObjectStart()
 		stream.WriteObjectField("result")
@@ -129,9 +137,12 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 
 		txCtx := evmtypes.TxContext{
-			TxHash:   txn.Hash(),
-			Origin:   msg.From(),
-			GasPrice: msg.GasPrice(),
+			TxHash:            txn.Hash(),
+			Origin:            msg.From(),
+			GasPrice:          msg.GasPrice(),
+			Txn:               txn,
+			CumulativeGasUsed: &cumulativeGas,
+			BlockNum:          block.NumberU64(),
 		}
 
 		if borTx != nil && idx == len(txns)-1 {
@@ -161,6 +172,57 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 		stream.Flush()
 	}
+
+	if config.Tracer != nil && *config.Tracer == "zeroTracer" {
+		if len(txns) != 0 {
+			stream.WriteMore()
+		}
+		stream.WriteObjectStart()
+		stream.WriteObjectField("block_witness")
+
+		k := make([]byte, 8)
+
+		binary.LittleEndian.PutUint64(k[:], block.NumberU64())
+
+		var witness_bytes []byte
+
+		// Try read from DB
+		if block.NumberU64() > 0 {
+			witness_bytes, err = stateless.ReadChunks(tx, kv.Witnesses, k)
+		}
+
+		// If not found, compute witness directly
+		if len(witness_bytes) == 0 || err != nil {
+			witness_bytes, err = api.getWitness(ctx, api.db, blockNrOrHash, log.Root())
+		}
+
+		if err != nil {
+			log.Warn("error while getting witness", "err", err)
+			stream.WriteNil()
+			return err
+		}
+
+		preImage := types.TriePreImage{
+			Combined: types.CombinedPreImages{
+				Compact: types.HexBytes(witness_bytes),
+			},
+		}
+
+		preImageHex, err := json.Marshal(preImage)
+
+		if err != nil {
+			log.Warn("error while marshalling preImage", "err", err)
+			stream.WriteNil()
+			return err
+		}
+
+		stream.Write(json.RawMessage(preImageHex))
+
+		stream.WriteObjectEnd()
+
+		stream.Flush()
+	}
+
 	stream.WriteArrayEnd()
 	stream.Flush()
 	return nil

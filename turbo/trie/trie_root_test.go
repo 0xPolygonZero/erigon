@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"math/big"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -137,11 +138,11 @@ func seedModifiedStorage(t *testing.T, db kv.RwDB, hashes []libcommon.Hash) [][]
 func rebuildFlatDBTrieHash(t *testing.T, rl *trie.RetainList, db kv.RoDB) libcommon.Hash {
 	t.Helper()
 	//startTime := time.Now()
-	loader := trie.NewFlatDBTrieLoader("test", rl, nil, nil, false)
+	loader := trie.NewFlatDBTrieLoader("test", rl, nil, nil, false, trie.NewRootHashAggregator(nil, nil, false))
 	tx, err := db.BeginRo(context.Background())
 	defer tx.Rollback()
 	require.NoError(t, err)
-	hash, err := loader.CalcTrieRoot(tx, nil)
+	hash, err := loader.Result(tx, nil)
 	tx.Rollback()
 	require.NoError(t, err)
 	//t.Logf("Rebuilt hash is %s and took %v", hash, time.Since(startTime))
@@ -159,18 +160,20 @@ func proveFlatDB(t *testing.T, db kv.RoDB, accountMissing bool, retainKeys, proo
 	for _, retainKey := range retainKeys {
 		rl.AddKeyWithMarker(retainKey, true)
 	}
-	loader := trie.NewFlatDBTrieLoader("test", rl, nil, nil, false)
+
+	receiver := trie.NewRootHashAggregator(nil, nil, false)
+	loader := trie.NewFlatDBTrieLoader("test", rl, nil, nil, false, receiver)
 	acc := &accounts.Account{}
 	if !accountMissing {
 		acc.Incarnation = 1
 		acc.Initialised = true
 	}
 	pr := trie.NewManualProofRetainer(t, acc, rl, proofKeys)
-	loader.SetProofRetainer(pr)
+	receiver.SetProofRetainer(pr)
 	tx, err := db.BeginRo(context.Background())
 	defer tx.Rollback()
 	require.NoError(t, err)
-	hash, err := loader.CalcTrieRoot(tx, nil)
+	hash, err := loader.Result(tx, nil)
 	tx.Rollback()
 	require.NoError(t, err)
 	//t.Logf("Proof root hash is %s and took %v", hash, time.Since(startTime))

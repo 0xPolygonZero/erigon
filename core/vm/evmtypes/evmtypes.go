@@ -39,10 +39,13 @@ type BlockContext struct {
 // All fields can change between transactions.
 type TxContext struct {
 	// Message information
-	TxHash     common.Hash
-	Origin     common.Address // Provides information for ORIGIN
-	GasPrice   *uint256.Int   // Provides information for GASPRICE
-	BlobHashes []common.Hash  // Provides versioned blob hashes for BLOBHASH
+	TxHash            common.Hash
+	Origin            common.Address // Provides information for ORIGIN
+	GasPrice          *uint256.Int   // Provides information for GASPRICE
+	BlobHashes        []common.Hash  // Provides versioned blob hashes for BLOBHASH
+	Txn               types.Transaction
+	CumulativeGasUsed *uint64
+	BlockNum          uint64
 }
 
 type (
@@ -108,4 +111,6 @@ type IntraBlockState interface {
 	Snapshot() int
 
 	AddLog(*types.Log)
+
+	GetLogs(hash common.Hash) []*types.Log
 }

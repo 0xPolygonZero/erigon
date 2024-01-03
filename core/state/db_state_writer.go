@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+
 	dbutils2 "github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
@@ -15,7 +16,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
@@ -36,6 +36,7 @@ type DbStateWriter struct {
 	db      putDel
 	blockNr uint64
 	csw     *ChangeSetWriter
+	legacy  bool
 }
 
 func (dsw *DbStateWriter) ChangeSetWriter() *ChangeSetWriter {
@@ -136,10 +137,19 @@ func (dsw *DbStateWriter) WriteAccountStorage(address libcommon.Address, incarna
 	compositeKey := dbutils2.GenerateCompositeStorageKey(addrHash, incarnation, seckey)
 
 	v := value.Bytes()
-	if len(v) == 0 {
-		return dsw.db.Delete(kv.HashedStorage, compositeKey)
+
+	var table string
+
+	if dsw.legacy {
+		table = kv.HashedAccounts
+	} else {
+		table = kv.HashedStorage
 	}
-	return dsw.db.Put(kv.HashedStorage, compositeKey, v)
+
+	if len(v) == 0 {
+		return dsw.db.Delete(table, compositeKey)
+	}
+	return dsw.db.Put(table, compositeKey, v)
 }
 
 func (dsw *DbStateWriter) CreateContract(address libcommon.Address) error {
@@ -160,7 +170,7 @@ func (dsw *DbStateWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = writeIndex(dsw.blockNr, accountChanges, kv.E2AccountsHistory, dsw.db.(ethdb.HasTx).Tx().(kv.RwTx))
+	err = writeIndex(dsw.blockNr, accountChanges, kv.E2AccountsHistory, dsw.db.(kv.RwTx))
 	if err != nil {
 		return err
 	}
@@ -169,7 +179,7 @@ func (dsw *DbStateWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	err = writeIndex(dsw.blockNr, storageChanges, kv.E2StorageHistory, dsw.db.(ethdb.HasTx).Tx().(kv.RwTx))
+	err = writeIndex(dsw.blockNr, storageChanges, kv.E2StorageHistory, dsw.db.(kv.RwTx))
 	if err != nil {
 		return err
 	}

@@ -23,15 +23,13 @@ import (
 	"sort"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
 func TestHashWithModificationsEmpty(t *testing.T) {
-	tr := New(libcommon.Hash{})
+	tr := New(common.Hash{})
 	// Populate the trie
 	// Build the root
 	var stream Stream
@@ -54,7 +52,7 @@ func TestHashWithModificationsEmpty(t *testing.T) {
 }
 
 func TestHashWithModificationsNoChanges(t *testing.T) {
-	tr := New(libcommon.Hash{})
+	tr := New(common.Hash{})
 	// Populate the trie
 	var preimage [4]byte
 	var keys []string
@@ -112,7 +110,7 @@ func TestHashWithModificationsNoChanges(t *testing.T) {
 }
 
 func TestHashWithModificationsChanges(t *testing.T) {
-	tr := New(libcommon.Hash{})
+	tr := New(common.Hash{})
 	// Populate the trie
 	var preimage [4]byte
 	var keys []string
@@ -151,7 +149,7 @@ func TestHashWithModificationsChanges(t *testing.T) {
 	tr.Hash()
 	// Generate account change
 	binary.BigEndian.PutUint32(preimage[:], 5000000)
-	var insertKey libcommon.Hash
+	var insertKey common.Hash
 	copy(insertKey[:], crypto.Keccak256(preimage[:]))
 	var insertA accounts.Account
 	insertA.Balance.SetUint64(300000)

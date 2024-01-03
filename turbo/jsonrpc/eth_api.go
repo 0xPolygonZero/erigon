@@ -97,6 +97,7 @@ type EthAPI interface {
 	Sign(ctx context.Context, _ common.Address, _ hexutility.Bytes) (hexutility.Bytes, error)
 	SignTransaction(_ context.Context, txObject interface{}) (common.Hash, error)
 	GetProof(ctx context.Context, address common.Address, storageKeys []common.Hash, blockNr rpc.BlockNumberOrHash) (*accounts.AccProofResult, error)
+	GetWitness(ctx context.Context, blockNr rpc.BlockNumberOrHash) (hexutility.Bytes, error)
 	CreateAccessList(ctx context.Context, args ethapi2.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, optimizeGas *bool) (*accessListResult, error)
 
 	// Mining related (see ./eth_mining.go)

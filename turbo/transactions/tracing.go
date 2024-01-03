@@ -82,7 +82,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil, nil)
 
 	logger := log.New("tracing")
-	core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, header, cfg, statedb, logger)
+	core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, header, cfg, statedb, nil, logger)
 
 	for idx, txn := range block.Transactions() {
 		select {
@@ -158,7 +158,10 @@ func TraceTx(
 			cfg = *config.TracerConfig
 		}
 		if tracer, err = tracers.New(*config.Tracer, &tracers.Context{
-			TxHash: txCtx.TxHash,
+			TxHash:            txCtx.TxHash,
+			Txn:               txCtx.Txn,
+			CumulativeGasUsed: txCtx.CumulativeGasUsed,
+			BlockNum:          blockCtx.BlockNumber,
 		}, cfg); err != nil {
 			stream.WriteNil()
 			return err

@@ -36,3 +36,50 @@ func ReadAccount(db kv.Getter, addr libcommon.Address, acc *accounts.Account) (b
 	}
 	return true, nil
 }
+
+func ReadAccountByHash(db kv.Tx, addr libcommon.Hash, acc *accounts.Account) (bool, error) {
+	enc, err := db.GetOne(kv.HashedAccounts, addr[:])
+	if err != nil {
+		return false, err
+	}
+	if len(enc) == 0 {
+		return false, nil
+	}
+	if err = acc.DecodeForStorage(enc); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func WriteAccount(db kv.RwTx, addrHash libcommon.Hash, acc accounts.Account) error {
+	addrHashBytes := addrHash[:]
+	value := make([]byte, acc.EncodingLengthForStorage())
+	acc.EncodeForStorage(value)
+	return db.Put(kv.HashedAccounts, addrHashBytes, value)
+}
+
+func DeleteAccount(db kv.RwTx, addrHash libcommon.Hash) error {
+	return db.Delete(kv.HashedAccounts, addrHash[:])
+}
+
+func PlainReadAccount(db kv.Tx, address libcommon.Address, acc *accounts.Account) (bool, error) {
+	enc, err := db.GetOne(kv.PlainState, address[:])
+	if err != nil {
+		return false, err
+	}
+	if err = acc.DecodeForStorage(enc); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func PlainWriteAccount(db kv.RwTx, address libcommon.Address, acc accounts.Account) error {
+	//fmt.Printf("PlainWriteAccount: %x %x\n", addrHash, acc.Root)
+	value := make([]byte, acc.EncodingLengthForStorage())
+	acc.EncodeForStorage(value)
+	return db.Put(kv.PlainState, address[:], value)
+}
+
+func PlainDeleteAccount(db kv.RwTx, address libcommon.Address) error {
+	return db.Delete(kv.PlainState, address[:])
+}

@@ -231,6 +231,8 @@ Invariants:
 */
 const TrieOfAccounts = "TrieAccount"
 const TrieOfStorage = "TrieStorage"
+const IntermediateTrieHash = "IntermediateTrieHash"
+const Witnesses = "witnesses"
 
 // Mapping [block number] => [Verkle Root]
 const VerkleRoots = "VerkleRoots"
@@ -304,6 +306,8 @@ const (
 	TxLookup = "BlockTransactionLookup" // hash -> transaction/receipt lookup metadata
 
 	ConfigTable = "Config" // config prefix for the db
+
+	PreimagePrefix = "SecureKey" // preimagePrefix + hash -> preimage
 
 	// Progress of sync stages: stageName -> stageData
 	SyncStageProgress = "SyncStage"
@@ -622,6 +626,9 @@ var ChaindataTables = []string{
 	BlockRootToBlockNumber,
 	LastBeaconSnapshot,
 	ValidatorPublicKeys,
+	IntermediateTrieHash,
+	PreimagePrefix,
+	Witnesses,
 }
 
 const (

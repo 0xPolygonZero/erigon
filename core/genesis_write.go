@@ -190,6 +190,9 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 		panic(err)
 	}
 
+	tds := state.NewTrieDbState(libcommon.Hash{}, tx, 0, nil)
+	tds.StartNewBuffer()
+
 	var stateWriter state.StateWriter
 	if ethconfig.EnableHistoryV4InTest {
 		panic("implement me")
@@ -207,7 +210,12 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 				}
 			}
 		}
-		stateWriter = state.NewPlainStateWriter(tx, tx, 0)
+
+		if ethconfig.EnableStateless {
+			stateWriter = tds.DbStateWriter()
+		} else {
+			stateWriter = state.NewPlainStateWriter(tx, tx, 0)
+		}
 	}
 
 	if block.Number().Sign() != 0 {
@@ -217,6 +225,7 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 	if err := statedb.CommitBlock(&chain.Rules{}, stateWriter); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %w", err)
 	}
+
 	if !histV3 {
 		if csw, ok := stateWriter.(state.WriterWithChangeSets); ok {
 			if err := csw.WriteChangeSets(); err != nil {
@@ -227,6 +236,7 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 			}
 		}
 	}
+
 	return block, statedb, nil
 }
 func MustCommitGenesis(g *types.Genesis, db kv.RwDB, tmpDir string) *types.Block {
@@ -592,6 +602,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 				statedb.SetIncarnation(addr, state.FirstContractIncarnation)
 			}
 		}
+
 		if err = statedb.FinalizeTx(&chain.Rules{}, w); err != nil {
 			return
 		}
@@ -658,6 +669,8 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 		return GnosisGenesisBlock()
 	case networkname.ChiadoChainName:
 		return ChiadoGenesisBlock()
+	case networkname.DevChainName:
+		return DeveloperGenesisBlock(0, DevnetEtherbase)
 	default:
 		return nil
 	}

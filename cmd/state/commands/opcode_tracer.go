@@ -712,7 +712,7 @@ func runBlock(engine consensus.Engine, ibs *state.IntraBlockState, txnWriter sta
 	usedGas := new(uint64)
 	usedBlobGas := new(uint64)
 	var receipts types.Receipts
-	core.InitializeBlockExecution(engine, nil, header, chainConfig, ibs, logger)
+	core.InitializeBlockExecution(engine, nil, header, chainConfig, ibs, nil, logger)
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	for i, tx := range block.Transactions() {
 		ibs.SetTxContext(tx.Hash(), block.Hash(), i)

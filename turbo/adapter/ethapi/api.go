@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"io"
 	"math/big"
 
 	"github.com/holiman/uint256"
@@ -32,7 +33,10 @@ import (
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
+	"github.com/ledgerwatch/erigon/rlp"
 )
 
 // CallArgs represents the arguments for a call.
@@ -264,6 +268,21 @@ func FormatLogs(logs []logger.StructLog) []StructLogRes {
 
 // RPCMarshalHeader converts the given header to the RPC output .
 func RPCMarshalHeader(head *types.Header) map[string]interface{} {
+	var signer libcommon.Address
+	if len(head.Extra) < crypto.SignatureLength {
+		signer = head.Coinbase
+	} else {
+		signature := head.Extra[len(head.Extra)-crypto.SignatureLength:]
+
+		// Recover the public key and the Ethereum address
+		pubkey, err := crypto.Ecrecover(SealHash(head).Bytes(), signature)
+		if err != nil {
+			signer = libcommon.Address{}
+		} else {
+			copy(signer[:], crypto.Keccak256(pubkey[1:])[12:])
+		}
+	}
+
 	result := map[string]interface{}{
 		"number":           (*hexutil.Big)(head.Number),
 		"hash":             head.Hash(),
@@ -273,7 +292,7 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 		"sha3Uncles":       head.UncleHash,
 		"logsBloom":        head.Bloom,
 		"stateRoot":        head.Root,
-		"miner":            head.Coinbase,
+		"miner":            signer,
 		"difficulty":       (*hexutil.Big)(head.Difficulty),
 		"extraData":        hexutility.Bytes(head.Extra),
 		"size":             hexutil.Uint64(head.Size()),
@@ -300,6 +319,41 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 	}
 
 	return result
+}
+
+func SealHash(header *types.Header) (hash libcommon.Hash) {
+	hasher := cryptopool.NewLegacyKeccak256()
+	defer cryptopool.ReturnToPoolKeccak256(hasher)
+
+	encodeSigHeader(hasher, header)
+	hasher.Sum(hash[:0])
+	return hash
+}
+
+func encodeSigHeader(w io.Writer, header *types.Header) {
+	enc := []interface{}{
+		header.ParentHash,
+		header.UncleHash,
+		header.Coinbase,
+		header.Root,
+		header.TxHash,
+		header.ReceiptHash,
+		header.Bloom,
+		header.Difficulty,
+		header.Number,
+		header.GasLimit,
+		header.GasUsed,
+		header.Time,
+		header.Extra[:len(header.Extra)-crypto.SignatureLength], // Yes, this will panic if extra is too short
+		header.MixDigest,
+		header.Nonce,
+	}
+	if header.BaseFee != nil {
+		enc = append(enc, header.BaseFee)
+	}
+	if err := rlp.Encode(w, enc); err != nil {
+		panic("can't encode: " + err.Error())
+	}
 }
 
 // RPCMarshalBlock converts the given block to the RPC output which depends on fullTx. If inclTx is true transactions are

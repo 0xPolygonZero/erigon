@@ -246,7 +246,11 @@ type BlockReader struct {
 }
 
 func NewBlockReader(snapshots services.BlockSnapshots, borSnapshots services.BlockSnapshots) *BlockReader {
-	return &BlockReader{sn: snapshots.(*RoSnapshots), borSn: borSnapshots.(*BorRoSnapshots)}
+	if borSnapshots != nil {
+		return &BlockReader{sn: snapshots.(*RoSnapshots), borSn: borSnapshots.(*BorRoSnapshots)}
+	} else {
+		return &BlockReader{sn: snapshots.(*RoSnapshots)}
+	}
 }
 
 func (r *BlockReader) CanPruneTo(currentBlockInDB uint64) uint64 {
