@@ -39,6 +39,7 @@ var (
 	Execution           SyncStage = "Execution"       // Executing each block w/o buildinf a trie
 	Translation         SyncStage = "Translation"     // Translation each marked for translation contract (from EVM to TEVM)
 	VerkleTrie          SyncStage = "VerkleTrie"
+	Witness             SyncStage = "Witness"             // Generating witness of the executed block
 	IntermediateHashes  SyncStage = "IntermediateHashes"  // Generate intermediate hashes, calculate the state root hash
 	HashState           SyncStage = "HashState"           // Apply Keccak256 to all the keys in the state
 	AccountHistoryIndex SyncStage = "AccountHistoryIndex" // Generating history index for accounts

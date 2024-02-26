@@ -1305,7 +1305,7 @@ func TestTDSWitness(t *testing.T) {
 
 	_, tx := memdb.NewTestTx(t)
 
-	tds := state.NewTrieDbState(libcommon.Hash{}, tx, 0)
+	tds := state.NewTrieDbState(libcommon.Hash{}, tx, 0, nil)
 
 	w := tds.DbStateWriter()
 

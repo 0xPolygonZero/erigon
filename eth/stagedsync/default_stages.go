@@ -20,6 +20,7 @@ func DefaultStages(ctx context.Context,
 	bodies BodiesCfg,
 	senders SendersCfg,
 	exec ExecuteBlockCfg,
+	witness WitnessCfg,
 	hashState HashStateCfg,
 	trieCfg TrieCfg,
 	history HistoryCfg,
@@ -128,6 +129,19 @@ func DefaultStages(ctx context.Context,
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
 				return PruneExecutionStage(p, tx, exec, ctx, firstCycle)
+			},
+		},
+		{
+			ID:          stages.Witness,
+			Description: "Generate witness of the executed block",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+				return SpawnWitnessStage(s, txc.Tx, witness, ctx, logger)
+			},
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
+				return UnwindWitnessStage()
+			},
+			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
+				return PruneWitnessStage()
 			},
 		},
 		{

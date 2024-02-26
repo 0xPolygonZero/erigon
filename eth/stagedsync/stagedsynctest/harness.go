@@ -71,6 +71,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		stagedsync.BodiesCfg{},
 		stagedsync.SendersCfg{},
 		stagedsync.ExecuteBlockCfg{},
+		stagedsync.WitnessCfg{},
 		stagedsync.HashStateCfg{},
 		stagedsync.TrieCfg{},
 		stagedsync.HistoryCfg{},
