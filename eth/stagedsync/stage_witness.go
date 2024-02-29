@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -38,8 +39,6 @@ func StageWitnessCfg(db kv.RwDB, chainConfig *chain.Config, engine consensus.Eng
 }
 
 func SpawnWitnessStage(s *StageState, tx kv.RwTx, cfg WitnessCfg, ctx context.Context, logger log.Logger) error {
-	// TODO: Handle case for erigon v3
-
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -62,7 +61,7 @@ func SpawnWitnessStage(s *StageState, tx kv.RwTx, cfg WitnessCfg, ctx context.Co
 	}
 
 	if to > s.BlockNumber+16 {
-		logger.Info(fmt.Sprintf("[%s] Promoting plain state", logPrefix), "from", s.BlockNumber, "to", to)
+		logger.Info(fmt.Sprintf("[%s] Witness Generation", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 
 	blockNr := s.BlockNumber
@@ -83,9 +82,6 @@ func SpawnWitnessStage(s *StageState, tx kv.RwTx, cfg WitnessCfg, ctx context.Co
 	if err != nil {
 		return err
 	}
-
-	// TODO: Handle case with max proof rewind block count
-	regenerate_hash := false
 
 	rl := trie.NewRetainList(0)
 	tds := state.NewTrieDbState(prevHeader.Root, tx, blockNr-1, reader)
@@ -158,9 +154,6 @@ func SpawnWitnessStage(s *StageState, tx kv.RwTx, cfg WitnessCfg, ctx context.Co
 		receiver.SetProofRetainer(pr)
 
 		loaderRl := rl
-		if regenerate_hash {
-			loaderRl = trie.NewRetainList(0)
-		}
 		subTrieloader := trie.NewFlatDBTrieLoader[trie.SubTries]("eth_getWitness", loaderRl, nil, nil, false, receiver)
 		subTries, err := subTrieloader.Result(tx, nil)
 
@@ -205,26 +198,26 @@ func SpawnWitnessStage(s *StageState, tx kv.RwTx, cfg WitnessCfg, ctx context.Co
 		return err
 	}
 
-	stateless, err := state.NewStateless(prevHeader.Root, nw, blockNr-1, false, false /* is binary */)
+	st, err := state.NewStateless(prevHeader.Root, nw, blockNr-1, false, false /* is binary */)
 	if err != nil {
 		return err
 	}
-	ibs := state.New(stateless)
-	stateless.SetBlockNr(blockNr)
+	ibs := state.New(st)
+	st.SetBlockNr(blockNr)
 
 	gp = new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(cfg.chainConfig.GetMaxBlobGasPerBlock())
 	usedGas = new(uint64)
 	usedBlobGas = new(uint64)
 	receipts = types.Receipts{}
 
-	if err := core.InitializeBlockExecution(cfg.engine, chainReader, block.Header(), cfg.chainConfig, ibs, stateless, nil); err != nil {
+	if err := core.InitializeBlockExecution(cfg.engine, chainReader, block.Header(), cfg.chainConfig, ibs, st, nil); err != nil {
 		return err
 	}
 	header := block.Header()
 
 	for i, txn := range block.Transactions() {
 		ibs.SetTxContext(txn.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(cfg.chainConfig, getHashFn, cfg.engine, nil, gp, ibs, stateless, header, txn, usedGas, usedBlobGas, vmConfig)
+		receipt, _, err := core.ApplyTransaction(cfg.chainConfig, getHashFn, cfg.engine, nil, gp, ibs, st, header, txn, usedGas, usedBlobGas, vmConfig)
 		if err != nil {
 			return fmt.Errorf("tx %x failed: %v", txn.Hash(), err)
 		}
@@ -260,14 +253,14 @@ func SpawnWitnessStage(s *StageState, tx kv.RwTx, cfg WitnessCfg, ctx context.Co
 
 		rules := cfg.chainConfig.Rules(block.NumberU64(), header.Time)
 
-		ibs.FinalizeTx(rules, stateless)
+		ibs.FinalizeTx(rules, st)
 
-		if err := ibs.CommitBlock(rules, stateless); err != nil {
+		if err := ibs.CommitBlock(rules, st); err != nil {
 			return fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
 		}
 	}
 
-	if err = stateless.CheckRoot(header.Root); err != nil {
+	if err = st.CheckRoot(header.Root); err != nil {
 		return err
 	}
 
@@ -280,9 +273,10 @@ func SpawnWitnessStage(s *StageState, tx kv.RwTx, cfg WitnessCfg, ctx context.Co
 		return fmt.Errorf("mismatch in expected state root computed %v vs %v indicates bug in witness implementation", roots[len(roots)-1], block.Root())
 	}
 
-	logger.Info("Witness generated successfully", "block", blockNr, "witness", buf.Bytes())
-
-	// TODO: Persist witness
+	err = WriteChunks(tx, kv.Witnesses, []byte(strconv.FormatUint(block.NumberU64(), 10)), buf.Bytes())
+	if err != nil {
+		return fmt.Errorf("error writing witness for block %d: %v", block.NumberU64(), err)
+	}
 
 	return nil
 }
