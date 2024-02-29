@@ -21,20 +21,18 @@ import (
 )
 
 type WitnessCfg struct {
-	db                          kv.RwDB
-	chainConfig                 *chain.Config
-	engine                      consensus.Engine
-	blockReader                 services.FullBlockReader
-	MaxGetProofRewindBlockCount int
+	db          kv.RwDB
+	chainConfig *chain.Config
+	engine      consensus.Engine
+	blockReader services.FullBlockReader
 }
 
-func StageWitnessCfg(db kv.RwDB, chainConfig *chain.Config, engine consensus.Engine, blockReader services.FullBlockReader, MaxGetProofRewindBlockCount int) WitnessCfg {
+func StageWitnessCfg(db kv.RwDB, chainConfig *chain.Config, engine consensus.Engine, blockReader services.FullBlockReader) WitnessCfg {
 	return WitnessCfg{
-		db:                          db,
-		chainConfig:                 chainConfig,
-		engine:                      engine,
-		blockReader:                 blockReader,
-		MaxGetProofRewindBlockCount: MaxGetProofRewindBlockCount,
+		db:          db,
+		chainConfig: chainConfig,
+		engine:      engine,
+		blockReader: blockReader,
 	}
 }
 
