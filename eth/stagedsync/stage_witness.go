@@ -8,12 +8,15 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/trie"
@@ -25,27 +28,34 @@ type WitnessCfg struct {
 	chainConfig *chain.Config
 	engine      consensus.Engine
 	blockReader services.FullBlockReader
+	dirs        datadir.Dirs
 }
 
-func StageWitnessCfg(db kv.RwDB, chainConfig *chain.Config, engine consensus.Engine, blockReader services.FullBlockReader) WitnessCfg {
+func StageWitnessCfg(db kv.RwDB, chainConfig *chain.Config, engine consensus.Engine, blockReader services.FullBlockReader, dirs datadir.Dirs) WitnessCfg {
 	return WitnessCfg{
 		db:          db,
 		chainConfig: chainConfig,
 		engine:      engine,
 		blockReader: blockReader,
+		dirs:        dirs,
 	}
 }
 
-func SpawnWitnessStage(s *StageState, tx kv.RwTx, cfg WitnessCfg, ctx context.Context, logger log.Logger) error {
-	useExternalTx := tx != nil
+func SpawnWitnessStage(s *StageState, rootTx kv.RwTx, cfg WitnessCfg, ctx context.Context, logger log.Logger) error {
+	useExternalTx := rootTx != nil
 	if !useExternalTx {
 		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
+		rootTx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
 			return err
 		}
-		defer tx.Rollback()
+		defer rootTx.Rollback()
 	}
+
+	// We'll need to use `rootTx` to write witness. As during rewind
+	// the tx is updated to an in-memory batch, we'll operate on the copy
+	// to keep the `rootTx` as it is.
+	tx := rootTx
 
 	logPrefix := s.LogPrefix()
 	to, err := s.ExecutionAt(tx)
@@ -53,16 +63,21 @@ func SpawnWitnessStage(s *StageState, tx kv.RwTx, cfg WitnessCfg, ctx context.Co
 		return err
 	}
 
+	// Note: This assumes that only 1 block is processed at a time. TODO: Handle batch
+	// Process the witness of previous block
+	blockNr := to - 1
+	if blockNr <= 0 {
+		return nil
+	}
+
 	if s.BlockNumber >= to {
 		// We already did witness generation for this block
 		return nil
 	}
 
-	if to > s.BlockNumber+16 {
-		logger.Info(fmt.Sprintf("[%s] Witness Generation", logPrefix), "from", s.BlockNumber, "to", to)
-	}
+	// logger.Info(fmt.Sprintf("[%s] Witness Generation", logPrefix), "from", s.BlockNumber, "to", to)
+	logger.Info(fmt.Sprintf("[%s] Witness Generation", logPrefix), "block", blockNr)
 
-	blockNr := s.BlockNumber
 	block, err := cfg.blockReader.BlockByNumber(ctx, tx, blockNr)
 	if err != nil {
 		return err
@@ -76,12 +91,37 @@ func SpawnWitnessStage(s *StageState, tx kv.RwTx, cfg WitnessCfg, ctx context.Co
 		return err
 	}
 
+	rl := trie.NewRetainList(0)
+
+	// Rewind the 'HashState' and 'IntermediateHashes' stages to previous block
+	batch := membatchwithdb.NewMemoryBatch(tx, "", logger)
+	defer batch.Rollback()
+
+	unwindState := &UnwindState{ID: stages.HashState, UnwindPoint: blockNr - 1}
+	stageState := &StageState{ID: stages.HashState, BlockNumber: blockNr}
+
+	hashStageCfg := StageHashStateCfg(nil, cfg.dirs, false)
+	if err := UnwindHashStateStage(unwindState, stageState, batch, hashStageCfg, ctx, logger); err != nil {
+		return err
+	}
+
+	unwindState = &UnwindState{ID: stages.IntermediateHashes, UnwindPoint: blockNr - 1}
+	stageState = &StageState{ID: stages.IntermediateHashes, BlockNumber: blockNr}
+
+	interHashStageCfg := StageTrieCfg(nil, false, false, false, "", cfg.blockReader, nil, false, nil)
+	err = UnwindIntermediateHashes("eth_getWitness", rl, unwindState, stageState, batch, interHashStageCfg, ctx.Done(), logger)
+	if err != nil {
+		return err
+	}
+
+	// Update the tx to operate on the in-memory batch
+	tx = batch
+
 	reader, err := rpchelper.CreateHistoryStateReader(tx, blockNr, 0, false, cfg.chainConfig.ChainName)
 	if err != nil {
 		return err
 	}
 
-	rl := trie.NewRetainList(0)
 	tds := state.NewTrieDbState(prevHeader.Root, tx, blockNr-1, reader)
 	tds.SetRetainList(rl)
 	tds.SetResolveReads(true)
@@ -271,10 +311,15 @@ func SpawnWitnessStage(s *StageState, tx kv.RwTx, cfg WitnessCfg, ctx context.Co
 		return fmt.Errorf("mismatch in expected state root computed %v vs %v indicates bug in witness implementation", roots[len(roots)-1], block.Root())
 	}
 
-	err = WriteChunks(tx, kv.Witnesses, []byte(strconv.FormatUint(block.NumberU64(), 10)), buf.Bytes())
+	err = WriteChunks(rootTx, kv.Witnesses, []byte(strconv.FormatUint(block.NumberU64(), 10)), buf.Bytes())
 	if err != nil {
 		return fmt.Errorf("error writing witness for block %d: %v", block.NumberU64(), err)
 	}
+
+	// Update the stage using the on-going block number (and not the block for which witness was written)
+	s.Update(rootTx, blockNr+1)
+
+	logger.Info(fmt.Sprintf("[%s] Witness Generation Completed", logPrefix), "block", blockNr, "len", len(buf.Bytes()))
 
 	return nil
 }

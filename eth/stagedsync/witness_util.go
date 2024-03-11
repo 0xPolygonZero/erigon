@@ -73,6 +73,21 @@ func ReadChunks(tx kv.Tx, tableName string, key []byte) ([]byte, error) {
 	return result, nil
 }
 
+// HasWitness returns whether a witness exists for the given key or not
+func HasWitness(tx kv.Tx, tableName string, key []byte) (bool, error) {
+	firstChunkKey := append(key, []byte("_chunk_0")...)
+	chunk, err := tx.GetOne(tableName, firstChunkKey)
+	if err != nil {
+		return false, err
+	}
+
+	if len(chunk) == 0 {
+		return false, nil
+	}
+
+	return true, nil
+}
+
 func (db *WitnessDBWriter) MustUpsertOneWitness(blockNumber uint64, witness *trie.Witness) {
 	k := make([]byte, 8)
 
