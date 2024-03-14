@@ -232,7 +232,7 @@ Invariants:
 const TrieOfAccounts = "TrieAccount"
 const TrieOfStorage = "TrieStorage"
 const IntermediateTrieHash = "IntermediateTrieHash"
-const Witnesses = "witnesses"
+const Witnesses = "witnesses" // block_num_u64 + "_chunk_" + chunk_num_u64 -> witness
 
 // Mapping [block number] => [Verkle Root]
 const VerkleRoots = "VerkleRoots"
