@@ -91,9 +91,15 @@ func SpawnWitnessStage(s *StageState, rootTx kv.RwTx, cfg WitnessCfg, ctx contex
 		from = to - cfg.maxWitnessLimit + 1
 	}
 
+	rl := trie.NewRetainList(0)
+	batch := membatchwithdb.NewMemoryBatch(tx, "", logger)
+	defer batch.Rollback()
+
 	logger.Info(fmt.Sprintf("[%s] Witness Generation", logPrefix), "from", from, "to", to)
 
 	for blockNr := from; blockNr <= to; blockNr++ {
+		tx := rootTx
+
 		block, err := cfg.blockReader.BlockByNumber(ctx, tx, blockNr)
 		if err != nil {
 			return err
@@ -107,7 +113,7 @@ func SpawnWitnessStage(s *StageState, rootTx kv.RwTx, cfg WitnessCfg, ctx contex
 			return err
 		}
 
-		batch, rl, err := rewindStagesForWitness(tx, blockNr, &cfg, ctx, logger)
+		batch, rl, err = rewindStagesForWitness(batch, blockNr, &cfg, ctx, logger)
 		if err != nil {
 			return err
 		}
@@ -147,7 +153,7 @@ func SpawnWitnessStage(s *StageState, rootTx kv.RwTx, cfg WitnessCfg, ctx contex
 		if err != nil {
 			return err
 		}
-		if w != nil {
+		if w == nil {
 			return fmt.Errorf("unable to generate witness for block %d", blockNr)
 		}
 
@@ -159,8 +165,7 @@ func SpawnWitnessStage(s *StageState, rootTx kv.RwTx, cfg WitnessCfg, ctx contex
 
 		err = verifyWitness(tx, block, prevHeader, chainReader, tds, getHashFn, &cfg, &buf, logger)
 		if err != nil {
-			logger.Debug(fmt.Sprintf("[%s] Error in verifying witness for block %d", logPrefix, blockNr), "err", err)
-			return err
+			return fmt.Errorf("error verifying witness for block %d: %v", blockNr, err)
 		}
 
 		err = WriteChunks(rootTx, kv.Witnesses, []byte(strconv.FormatUint(block.NumberU64(), 10)), buf.Bytes())
@@ -182,13 +187,10 @@ func SpawnWitnessStage(s *StageState, rootTx kv.RwTx, cfg WitnessCfg, ctx contex
 	return nil
 }
 
-func rewindStagesForWitness(tx kv.RwTx, blockNr uint64, cfg *WitnessCfg, ctx context.Context, logger log.Logger) (kv.RwTx, *trie.RetainList, error) {
+func rewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr uint64, cfg *WitnessCfg, ctx context.Context, logger log.Logger) (*membatchwithdb.MemoryMutation, *trie.RetainList, error) {
 	rl := trie.NewRetainList(0)
 
 	// Rewind the 'HashState' and 'IntermediateHashes' stages to previous block
-	batch := membatchwithdb.NewMemoryBatch(tx, "", logger)
-	defer batch.Rollback()
-
 	unwindState := &UnwindState{ID: stages.HashState, UnwindPoint: blockNr - 1}
 	stageState := &StageState{ID: stages.HashState, BlockNumber: blockNr}
 
