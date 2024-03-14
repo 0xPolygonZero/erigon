@@ -24,24 +24,33 @@ import (
 )
 
 type WitnessCfg struct {
-	db          kv.RwDB
-	chainConfig *chain.Config
-	engine      consensus.Engine
-	blockReader services.FullBlockReader
-	dirs        datadir.Dirs
+	db                      kv.RwDB
+	enableWitnessGeneration bool
+	maxWitnessLimit         uint64
+	chainConfig             *chain.Config
+	engine                  consensus.Engine
+	blockReader             services.FullBlockReader
+	dirs                    datadir.Dirs
 }
 
-func StageWitnessCfg(db kv.RwDB, chainConfig *chain.Config, engine consensus.Engine, blockReader services.FullBlockReader, dirs datadir.Dirs) WitnessCfg {
+func StageWitnessCfg(db kv.RwDB, enableWitnessGeneration bool, maxWitnessLimit uint64, chainConfig *chain.Config, engine consensus.Engine, blockReader services.FullBlockReader, dirs datadir.Dirs) WitnessCfg {
 	return WitnessCfg{
-		db:          db,
-		chainConfig: chainConfig,
-		engine:      engine,
-		blockReader: blockReader,
-		dirs:        dirs,
+		db:                      db,
+		enableWitnessGeneration: enableWitnessGeneration,
+		maxWitnessLimit:         maxWitnessLimit,
+		chainConfig:             chainConfig,
+		engine:                  engine,
+		blockReader:             blockReader,
+		dirs:                    dirs,
 	}
 }
 
 func SpawnWitnessStage(s *StageState, rootTx kv.RwTx, cfg WitnessCfg, ctx context.Context, logger log.Logger) error {
+	if !cfg.enableWitnessGeneration {
+		logger.Debug(fmt.Sprintf("[%s] Skipping Witness Generation", s.LogPrefix()))
+		return nil
+	}
+
 	useExternalTx := rootTx != nil
 	if !useExternalTx {
 		var err error

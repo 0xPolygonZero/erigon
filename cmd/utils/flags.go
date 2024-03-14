@@ -926,6 +926,18 @@ var (
 		Usage: "set the cors' allow origins",
 		Value: cli.NewStringSlice(),
 	}
+
+	// Witness stage
+	EnableWitnessGenerationFlag = cli.BoolFlag{
+		Name:  "witness",
+		Usage: "Enables the witness generation stage",
+		Value: true,
+	}
+	MaxWitnessLimitFlag = cli.Uint64Flag{
+		Name:  "witness.limit",
+		Usage: "Maximum number of witness allowed to store at a time",
+		Value: 10_000,
+	}
 )
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag}
@@ -1568,6 +1580,11 @@ func setSilkworm(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.SilkwormSentry = ctx.Bool(SilkwormSentryFlag.Name)
 }
 
+func setWitness(ctx *cli.Context, cfg *ethconfig.Config) {
+	cfg.EnableWitnessGeneration = ctx.Bool(EnableWitnessGenerationFlag.Name)
+	cfg.MaxWitnessLimit = ctx.Uint64(MaxWitnessLimitFlag.Name)
+}
+
 // CheckExclusive verifies that only a single instance of the provided flags was
 // set by the user. Each flag might optionally be followed by a string type to
 // specialize it further.
@@ -1678,6 +1695,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setSilkworm(ctx, cfg)
 	setBeaconAPI(ctx, cfg)
 	setCaplin(ctx, cfg)
+	setWitness(ctx, cfg)
 
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 	cfg.HistoryV3 = ctx.Bool(HistoryV3Flag.Name)

@@ -229,6 +229,13 @@ type Config struct {
 	//  New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
 	HistoryV3 bool
 
+	// EnableWitnessGeneration if true enables the witness generation stage post block execution
+	EnableWitnessGeneration bool
+
+	// MaxWitnessLimit denotes the maximum number of witness allowed to be stored at a time. As new
+	// witnesses are added, the older ones are pruned to maintain the limit.
+	MaxWitnessLimit uint64
+
 	// URL to connect to Heimdall node
 	HeimdallURL string
 

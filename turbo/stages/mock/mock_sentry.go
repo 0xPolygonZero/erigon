@@ -460,7 +460,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 				mock.agg,
 				nil,
 			),
-			stagedsync.StageWitnessCfg(mock.DB, mock.ChainConfig, mock.Engine, mock.BlockReader, mock.Dirs),
+			stagedsync.StageWitnessCfg(mock.DB, cfg.EnableWitnessGeneration, cfg.MaxWitnessLimit, mock.ChainConfig, mock.Engine, mock.BlockReader, mock.Dirs),
 			stagedsync.StageHashStateCfg(mock.DB, mock.Dirs, cfg.HistoryV3),
 			stagedsync.StageTrieCfg(mock.DB, checkStateRoot, true, false, dirs.Tmp, mock.BlockReader, mock.sentriesClient.Hd, cfg.HistoryV3, mock.agg),
 			stagedsync.StageHistoryCfg(mock.DB, prune, dirs.Tmp),
