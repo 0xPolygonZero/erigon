@@ -88,6 +88,46 @@ func HasWitness(tx kv.Tx, tableName string, key []byte) (bool, error) {
 	return true, nil
 }
 
+// DeleteChunks deletes all the chunks present with prefix `key`
+// TODO: Try to see if this can be optimised by using tx.ForEach
+// and iterate over each element with prefix `key`
+func DeleteChunks(tx kv.RwTx, tableName string, key []byte) error {
+	for i := 0; ; i++ {
+		chunkKey := append(key, []byte("_chunk_"+strconv.Itoa(i))...)
+		chunk, err := tx.GetOne(tableName, chunkKey)
+		if err != nil {
+			return err
+		}
+
+		err = tx.Delete(tableName, chunkKey)
+		if err != nil {
+			return err
+		}
+
+		// Check if this is the last chunk
+		if len(chunk) == 0 {
+			break
+		}
+	}
+
+	return nil
+}
+
+// FindOldestWitness returns the block number of the oldest stored block
+func FindOldestWitness(tx kv.Tx, tableName string) (uint64, error) {
+	cursor, err := tx.Cursor(tableName)
+	if err != nil {
+		return 0, err
+	}
+
+	k, _, err := cursor.First()
+	if err != nil {
+		return 0, err
+	}
+
+	return BytesToUint64(k), nil
+}
+
 func (db *WitnessDBWriter) MustUpsertOneWitness(blockNumber uint64, witness *trie.Witness) {
 	k := make([]byte, 8)
 
@@ -191,4 +231,17 @@ func deriveDbKey(blockNumber uint64, maxTrieSize uint32) []byte {
 	binary.LittleEndian.PutUint32(buffer[8:], maxTrieSize)
 
 	return buffer
+}
+
+func BytesToUint64(b []byte) uint64 {
+	if len(b) < 8 {
+		return 0
+	}
+	return binary.BigEndian.Uint64(b)
+}
+
+func Uint64ToBytes(i uint64) []byte {
+	buf := make([]byte, 8)
+	binary.BigEndian.PutUint64(buf, i)
+	return buf
 }

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"strconv"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -168,16 +167,32 @@ func SpawnWitnessStage(s *StageState, rootTx kv.RwTx, cfg WitnessCfg, ctx contex
 			return fmt.Errorf("error verifying witness for block %d: %v", blockNr, err)
 		}
 
-		err = WriteChunks(rootTx, kv.Witnesses, []byte(strconv.FormatUint(block.NumberU64(), 10)), buf.Bytes())
-		if err != nil {
-			return fmt.Errorf("error writing witness for block %d: %v", block.NumberU64(), err)
+		// Check if we already have a witness for the same block (can happen during a reorg)
+		exist, _ := HasWitness(rootTx, kv.Witnesses, Uint64ToBytes(blockNr))
+		if exist {
+			err = DeleteChunks(rootTx, kv.Witnesses, Uint64ToBytes(blockNr))
+			if err != nil {
+				return fmt.Errorf("error deletig witness for block %d: %v", blockNr, err)
+			}
 		}
 
-		// Delete old witnesses if required
-		// TODO
+		// Write the witness buffer against the corresponding block number
+		err = WriteChunks(rootTx, kv.Witnesses, Uint64ToBytes(blockNr), buf.Bytes())
+		if err != nil {
+			return fmt.Errorf("error writing witness for block %d: %v", blockNr, err)
+		}
 
 		// Update the stage with the latest block number
 		s.Update(rootTx, blockNr)
+
+		// If we're overlimit, delete oldest witness
+		oldestWitnessBlock, _ := FindOldestWitness(rootTx, kv.Witnesses)
+		if blockNr-oldestWitnessBlock+1 > cfg.maxWitnessLimit {
+			err = DeleteChunks(rootTx, kv.Witnesses, Uint64ToBytes(oldestWitnessBlock))
+			if err != nil {
+				return fmt.Errorf("error deletig witness for block %d: %v", blockNr, err)
+			}
+		}
 
 		logger.Info(fmt.Sprintf("[%s] Generated witness", logPrefix), "block", blockNr, "len", len(buf.Bytes()))
 	}
