@@ -112,7 +112,7 @@ func SpawnWitnessStage(s *StageState, rootTx kv.RwTx, cfg WitnessCfg, ctx contex
 			return err
 		}
 
-		batch, rl, err = rewindStagesForWitness(batch, blockNr, &cfg, ctx, logger)
+		batch, rl, err = rewindStagesForWitness(batch, blockNr, &cfg, false, ctx, logger)
 		if err != nil {
 			return err
 		}
@@ -148,7 +148,7 @@ func SpawnWitnessStage(s *StageState, rootTx kv.RwTx, cfg WitnessCfg, ctx contex
 		}
 		getHashFn := core.GetHashFn(block.Header(), getHeader)
 
-		w, err := generateWitness(tx, block, prevHeader, tds, trieStateWriter, statedb, getHashFn, &cfg, ctx, logger)
+		w, err := generateWitness(tx, block, prevHeader, tds, trieStateWriter, statedb, getHashFn, &cfg, false, ctx, logger)
 		if err != nil {
 			return err
 		}
@@ -204,7 +204,7 @@ func SpawnWitnessStage(s *StageState, rootTx kv.RwTx, cfg WitnessCfg, ctx contex
 	return nil
 }
 
-func rewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr uint64, cfg *WitnessCfg, ctx context.Context, logger log.Logger) (*membatchwithdb.MemoryMutation, *trie.RetainList, error) {
+func rewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr uint64, cfg *WitnessCfg, regenerateHash bool, ctx context.Context, logger log.Logger) (*membatchwithdb.MemoryMutation, *trie.RetainList, error) {
 	rl := trie.NewRetainList(0)
 
 	// Rewind the 'HashState' and 'IntermediateHashes' stages to previous block
@@ -219,16 +219,21 @@ func rewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr uint64
 	unwindState = &UnwindState{ID: stages.IntermediateHashes, UnwindPoint: blockNr - 1}
 	stageState = &StageState{ID: stages.IntermediateHashes, BlockNumber: blockNr}
 
-	interHashStageCfg := StageTrieCfg(nil, false, false, false, "", cfg.blockReader, nil, false, nil)
-	err := UnwindIntermediateHashes("eth_getWitness", rl, unwindState, stageState, batch, interHashStageCfg, ctx.Done(), logger)
-	if err != nil {
-		return nil, nil, err
+	if !regenerateHash {
+		interHashStageCfg := StageTrieCfg(nil, false, false, false, "", cfg.blockReader, nil, false, nil)
+		err := UnwindIntermediateHashes("eth_getWitness", rl, unwindState, stageState, batch, interHashStageCfg, ctx.Done(), logger)
+		if err != nil {
+			return nil, nil, err
+		}
+	} else {
+		_ = batch.ClearBucket(kv.TrieOfAccounts)
+		_ = batch.ClearBucket(kv.TrieOfStorage)
 	}
 
 	return batch, rl, nil
 }
 
-func generateWitness(tx kv.RwTx, block *types.Block, prevHeader *types.Header, tds *state.TrieDbState, trieStateWriter *state.TrieStateWriter, statedb *state.IntraBlockState, getHashFn func(n uint64) libcommon.Hash, cfg *WitnessCfg, ctx context.Context, logger log.Logger) (*trie.Witness, error) {
+func generateWitness(tx kv.RwTx, block *types.Block, prevHeader *types.Header, tds *state.TrieDbState, trieStateWriter *state.TrieStateWriter, statedb *state.IntraBlockState, getHashFn func(n uint64) libcommon.Hash, cfg *WitnessCfg, regenerateHash bool, ctx context.Context, logger log.Logger) (*trie.Witness, error) {
 	blockNr := block.NumberU64()
 	usedGas := new(uint64)
 	usedBlobGas := new(uint64)
@@ -277,6 +282,9 @@ func generateWitness(tx kv.RwTx, block *types.Block, prevHeader *types.Header, t
 		receiver.SetProofRetainer(pr)
 
 		loaderRl := rl
+		if regenerateHash {
+			loaderRl = trie.NewRetainList(0)
+		}
 		subTrieloader := trie.NewFlatDBTrieLoader[trie.SubTries]("eth_getWitness", loaderRl, nil, nil, false, receiver)
 		subTries, err := subTrieloader.Result(tx, nil)
 
