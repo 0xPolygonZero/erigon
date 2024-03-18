@@ -459,8 +459,11 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	// Check if the witness is present in the database. If found, return it.
 	wBytes, err := stagedsync.ReadChunks(tx, kv.Witnesses, stagedsync.Uint64ToBytes(blockNr))
 	if err == nil && wBytes != nil {
+		logger.Debug("Returning witness found in db", "blockNr", blockNr)
 		return wBytes, nil
 	}
+
+	logger.Debug("Witness unavailable in db, calculating", "blockNr", blockNr)
 
 	// If witness is not present in the db, or there's some error reading it, compute it
 	prevHeader, err := api._blockReader.HeaderByNumber(ctx, tx, blockNr-1)
