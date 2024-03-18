@@ -170,6 +170,7 @@ func SpawnWitnessStage(s *StageState, rootTx kv.RwTx, cfg WitnessCfg, ctx contex
 		// Check if we already have a witness for the same block (can happen during a reorg)
 		exist, _ := HasWitness(rootTx, kv.Witnesses, Uint64ToBytes(blockNr))
 		if exist {
+			logger.Debug("Deleting witness chunks for existing block", "block", blockNr)
 			err = DeleteChunks(rootTx, kv.Witnesses, Uint64ToBytes(blockNr))
 			if err != nil {
 				return fmt.Errorf("error deletig witness for block %d: %v", blockNr, err)
@@ -188,6 +189,7 @@ func SpawnWitnessStage(s *StageState, rootTx kv.RwTx, cfg WitnessCfg, ctx contex
 		// If we're overlimit, delete oldest witness
 		oldestWitnessBlock, _ := FindOldestWitness(rootTx, kv.Witnesses)
 		if blockNr-oldestWitnessBlock+1 > cfg.maxWitnessLimit {
+			logger.Debug("Reached max witness limit, deleting oldest witness", "block", oldestWitnessBlock)
 			err = DeleteChunks(rootTx, kv.Witnesses, Uint64ToBytes(oldestWitnessBlock))
 			if err != nil {
 				return fmt.Errorf("error deletig witness for block %d: %v", blockNr, err)
