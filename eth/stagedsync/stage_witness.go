@@ -178,6 +178,7 @@ func SpawnWitnessStage(s *StageState, rootTx kv.RwTx, cfg WitnessCfg, ctx contex
 		}
 
 		// Write the witness buffer against the corresponding block number
+		logger.Debug("Writing witness to db", "block", blockNr)
 		err = WriteChunks(rootTx, kv.Witnesses, Uint64ToBytes(blockNr), buf.Bytes())
 		if err != nil {
 			return fmt.Errorf("error writing witness for block %d: %v", blockNr, err)
@@ -189,10 +190,15 @@ func SpawnWitnessStage(s *StageState, rootTx kv.RwTx, cfg WitnessCfg, ctx contex
 		// If we're overlimit, delete oldest witness
 		oldestWitnessBlock, _ := FindOldestWitness(rootTx, kv.Witnesses)
 		if blockNr-oldestWitnessBlock+1 > cfg.maxWitnessLimit {
-			logger.Debug("Reached max witness limit, deleting oldest witness", "block", oldestWitnessBlock)
-			err = DeleteChunks(rootTx, kv.Witnesses, Uint64ToBytes(oldestWitnessBlock))
-			if err != nil {
-				return fmt.Errorf("error deletig witness for block %d: %v", blockNr, err)
+			// If the user reduces `witness.limit`, we'll need to delete witnesses more than just oldest
+			deleteFrom := oldestWitnessBlock
+			deleteTo := blockNr - cfg.maxWitnessLimit
+			logger.Debug("Reached max witness limit, deleting oldest witness", "from", deleteFrom, "to", deleteTo)
+			for i := deleteFrom; i <= deleteTo; i++ {
+				err = DeleteChunks(rootTx, kv.Witnesses, Uint64ToBytes(i))
+				if err != nil {
+					return fmt.Errorf("error deleting witness for block %d: %v", i, err)
+				}
 			}
 		}
 
