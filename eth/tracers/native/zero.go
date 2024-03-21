@@ -98,7 +98,8 @@ func (t *zeroTracer) CaptureTxStart(gasLimit uint64) {
 
 // CaptureState implements the EVMLogger interface to trace a single step of VM execution.
 func (t *zeroTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
-	if err != nil {
+	// Only continue if the error is nil or if the error is out of gas and the opcode is SSTORE or CALL
+	if !(err == nil || (err == vm.ErrOutOfGas && (op == vm.SSTORE || op == vm.CALL))) {
 		return
 	}
 
@@ -115,9 +116,18 @@ func (t *zeroTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sco
 	switch {
 	case stackLen >= 1 && op == vm.SLOAD:
 		slot := libcommon.Hash(stackData[stackLen-1].Bytes32())
+		t.addAccountToTrace(caller)
 		t.addSLOADToAccount(caller, slot)
 	case stackLen >= 1 && op == vm.SSTORE:
 		slot := libcommon.Hash(stackData[stackLen-1].Bytes32())
+
+		// If the SSTORE is out of gas and the slot is in live state, we will add the slot to account read
+		if err == vm.ErrOutOfGas && t.env.IntraBlockState().HasLiveState(caller, &slot) {
+			t.addAccountToTrace(caller)
+			t.addSLOADToAccount(caller, slot)
+			return
+		}
+		t.addAccountToTrace(caller)
 		t.addSSTOREToAccount(caller, slot, stackData[stackLen-2].Clone())
 	case stackLen >= 1 && (op == vm.EXTCODECOPY || op == vm.EXTCODEHASH || op == vm.EXTCODESIZE || op == vm.BALANCE || op == vm.SELFDESTRUCT):
 		addr := libcommon.Address(stackData[stackLen-1].Bytes20())
@@ -125,6 +135,12 @@ func (t *zeroTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sco
 		t.addOpCodeToAccount(addr, op)
 	case stackLen >= 5 && (op == vm.DELEGATECALL || op == vm.CALL || op == vm.STATICCALL || op == vm.CALLCODE):
 		addr := libcommon.Address(stackData[stackLen-2].Bytes20())
+
+		// If the call is out of gas, we will add account but not the opcode
+		if err == vm.ErrOutOfGas && op == vm.CALL {
+			t.addAccountToTrace(caller)
+			return
+		}
 		t.addAccountToTrace(addr)
 		t.addOpCodeToAccount(addr, op)
 	case op == vm.CREATE:
