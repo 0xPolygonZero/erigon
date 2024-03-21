@@ -496,9 +496,12 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	}
 
 	// Prepare witness config
-	chainConfig := api._chainConfig.Load()
-	cfg := stagedsync.StageWitnessCfg(nil, true, 0, chainConfig, engine, api._blockReader, api.dirs)
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, fmt.Errorf("error loading chain config: %v", err)
+	}
 
+	cfg := stagedsync.StageWitnessCfg(nil, true, 0, chainConfig, engine, api._blockReader, api.dirs)
 	batch, rl, err = stagedsync.RewindStagesForWitness(batch, blockNr, &cfg, regenerateHash, ctx, logger)
 	if err != nil {
 		return nil, err
