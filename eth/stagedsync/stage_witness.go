@@ -33,6 +33,14 @@ type WitnessCfg struct {
 	dirs                    datadir.Dirs
 }
 
+type WitnessStore struct {
+	Tds             *state.TrieDbState
+	TrieStateWriter *state.TrieStateWriter
+	Statedb         *state.IntraBlockState
+	ChainReader     *ChainReaderImpl
+	GetHashFn       func(n uint64) libcommon.Hash
+}
+
 func StageWitnessCfg(db kv.RwDB, enableWitnessGeneration bool, maxWitnessLimit uint64, chainConfig *chain.Config, engine consensus.Engine, blockReader services.FullBlockReader, dirs datadir.Dirs) WitnessCfg {
 	return WitnessCfg{
 		db:                      db,
@@ -121,36 +129,12 @@ func SpawnWitnessStage(s *StageState, rootTx kv.RwTx, cfg WitnessCfg, ctx contex
 		// Update the tx to operate on the in-memory batch
 		tx = batch
 
-		reader, err := rpchelper.CreateHistoryStateReader(tx, blockNr, 0, false, cfg.chainConfig.ChainName)
+		store, err := PrepareForWitness(tx, block, prevHeader.Root, rl, &cfg, ctx, logger)
 		if err != nil {
 			return err
 		}
 
-		tds := state.NewTrieDbState(prevHeader.Root, tx, blockNr-1, reader)
-		tds.SetRetainList(rl)
-		tds.SetResolveReads(true)
-
-		tds.StartNewBuffer()
-		trieStateWriter := tds.TrieStateWriter()
-
-		statedb := state.New(tds)
-		statedb.SetDisableBalanceInc(true)
-
-		chainReader := NewChainReaderImpl(cfg.chainConfig, tx, cfg.blockReader, logger)
-		if err := core.InitializeBlockExecution(cfg.engine, chainReader, block.Header(), cfg.chainConfig, statedb, trieStateWriter, nil); err != nil {
-			return err
-		}
-
-		getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
-			h, e := cfg.blockReader.Header(ctx, tx, hash, number)
-			if e != nil {
-				log.Error("getHeader error", "number", number, "hash", hash, "err", e)
-			}
-			return h
-		}
-		getHashFn := core.GetHashFn(block.Header(), getHeader)
-
-		w, txTds, err := GenerateWitness(tx, block, prevHeader, true, 0, tds, trieStateWriter, statedb, getHashFn, &cfg, false, ctx, logger)
+		w, txTds, err := GenerateWitness(tx, block, prevHeader, true, 0, store.Tds, store.TrieStateWriter, store.Statedb, store.GetHashFn, &cfg, false, ctx, logger)
 		if err != nil {
 			return err
 		}
@@ -164,7 +148,7 @@ func SpawnWitnessStage(s *StageState, rootTx kv.RwTx, cfg WitnessCfg, ctx contex
 			return err
 		}
 
-		_, err = VerifyWitness(tx, block, prevHeader, true, 0, chainReader, tds, txTds, getHashFn, &cfg, &buf, logger)
+		_, err = VerifyWitness(tx, block, prevHeader, true, 0, store.ChainReader, store.Tds, txTds, store.GetHashFn, &cfg, &buf, logger)
 		if err != nil {
 			return fmt.Errorf("error verifying witness for block %d: %v", blockNr, err)
 		}
@@ -212,6 +196,49 @@ func SpawnWitnessStage(s *StageState, rootTx kv.RwTx, cfg WitnessCfg, ctx contex
 	return nil
 }
 
+// PrepareForWitness abstracts the process of initialising bunch of necessary things required for witness
+// generation and puts them in a WitnessStore.
+func PrepareForWitness(tx kv.Tx, block *types.Block, prevRoot libcommon.Hash, rl *trie.RetainList, cfg *WitnessCfg, ctx context.Context, logger log.Logger) (*WitnessStore, error) {
+	blockNr := block.NumberU64()
+	reader, err := rpchelper.CreateHistoryStateReader(tx, blockNr, 0, false, cfg.chainConfig.ChainName)
+	if err != nil {
+		return nil, err
+	}
+
+	tds := state.NewTrieDbState(prevRoot, tx, blockNr-1, reader)
+	tds.SetRetainList(rl)
+	tds.SetResolveReads(true)
+
+	tds.StartNewBuffer()
+	trieStateWriter := tds.TrieStateWriter()
+
+	statedb := state.New(tds)
+	statedb.SetDisableBalanceInc(true)
+
+	chainReader := NewChainReaderImpl(cfg.chainConfig, tx, cfg.blockReader, logger)
+	if err := core.InitializeBlockExecution(cfg.engine, chainReader, block.Header(), cfg.chainConfig, statedb, trieStateWriter, nil); err != nil {
+		return nil, err
+	}
+
+	getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
+		h, e := cfg.blockReader.Header(ctx, tx, hash, number)
+		if e != nil {
+			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
+		}
+		return h
+	}
+	getHashFn := core.GetHashFn(block.Header(), getHeader)
+
+	return &WitnessStore{
+		Tds:             tds,
+		TrieStateWriter: trieStateWriter,
+		Statedb:         statedb,
+		ChainReader:     chainReader,
+		GetHashFn:       getHashFn,
+	}, nil
+}
+
+// RewindStagesForWitness rewinds the 'HashState' and 'IntermediateHashes' stages to previous block.
 func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr uint64, cfg *WitnessCfg, regenerateHash bool, ctx context.Context, logger log.Logger) (*membatchwithdb.MemoryMutation, *trie.RetainList, error) {
 	rl := trie.NewRetainList(0)
 
@@ -241,6 +268,8 @@ func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr uint64
 	return batch, rl, nil
 }
 
+// GenerateWitness does the core witness generation part by re-executing transactions in the block. It
+// assumes that the 'HashState' and 'IntermediateHashes' stages are already rewinded to the previous block.
 func GenerateWitness(tx kv.Tx, block *types.Block, prevHeader *types.Header, fullBlock bool, txIndex uint64, tds *state.TrieDbState, trieStateWriter *state.TrieStateWriter, statedb *state.IntraBlockState, getHashFn func(n uint64) libcommon.Hash, cfg *WitnessCfg, regenerateHash bool, ctx context.Context, logger log.Logger) (*trie.Witness, *state.TrieDbState, error) {
 	blockNr := block.NumberU64()
 	usedGas := new(uint64)
@@ -349,6 +378,7 @@ func GenerateWitness(tx kv.Tx, block *types.Block, prevHeader *types.Header, ful
 	return w, txTds, nil
 }
 
+// VerifyWitness verifies if the correct state trie can be re-generated by the witness (prepared earlier).
 func VerifyWitness(tx kv.Tx, block *types.Block, prevHeader *types.Header, fullBlock bool, txIndex uint64, chainReader *ChainReaderImpl, tds *state.TrieDbState, txTds *state.TrieDbState, getHashFn func(n uint64) libcommon.Hash, cfg *WitnessCfg, buf *bytes.Buffer, logger log.Logger) (*bytes.Buffer, error) {
 	blockNr := block.NumberU64()
 	nw, err := trie.NewWitnessFromReader(bytes.NewReader(buf.Bytes()), false)

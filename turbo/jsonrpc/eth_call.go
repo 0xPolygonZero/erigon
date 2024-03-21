@@ -507,36 +507,12 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	// Update the tx to operate on the in-memory batch
 	tx = batch
 
-	reader, err := rpchelper.CreateHistoryStateReader(tx, blockNr, 0, false, chainConfig.ChainName)
+	store, err := stagedsync.PrepareForWitness(tx, block, prevHeader.Root, rl, &cfg, ctx, logger)
 	if err != nil {
 		return nil, err
 	}
 
-	tds := state.NewTrieDbState(prevHeader.Root, tx, blockNr-1, reader)
-	tds.SetRetainList(rl)
-	tds.SetResolveReads(true)
-
-	tds.StartNewBuffer()
-	trieStateWriter := tds.TrieStateWriter()
-
-	statedb := state.New(tds)
-	statedb.SetDisableBalanceInc(true)
-
-	chainReader := stagedsync.NewChainReaderImpl(chainConfig, tx, api._blockReader, logger)
-	if err := core.InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, statedb, trieStateWriter, nil); err != nil {
-		return nil, err
-	}
-
-	getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
-		h, e := api._blockReader.Header(ctx, tx, hash, number)
-		if e != nil {
-			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
-		}
-		return h
-	}
-	getHashFn := core.GetHashFn(block.Header(), getHeader)
-
-	w, txTds, err := stagedsync.GenerateWitness(tx, block, prevHeader, fullBlock, uint64(txIndex), tds, trieStateWriter, statedb, getHashFn, &cfg, regenerateHash, ctx, logger)
+	w, txTds, err := stagedsync.GenerateWitness(tx, block, prevHeader, fullBlock, uint64(txIndex), store.Tds, store.TrieStateWriter, store.Statedb, store.GetHashFn, &cfg, regenerateHash, ctx, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -550,7 +526,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		return nil, err
 	}
 
-	buf, err := stagedsync.VerifyWitness(tx, block, prevHeader, fullBlock, uint64(txIndex), chainReader, tds, txTds, getHashFn, &cfg, &witness, logger)
+	buf, err := stagedsync.VerifyWitness(tx, block, prevHeader, fullBlock, uint64(txIndex), store.ChainReader, store.Tds, txTds, store.GetHashFn, &cfg, &witness, logger)
 	if err != nil {
 		return nil, fmt.Errorf("error verifying witness for block %d: %v", blockNr, err)
 	}
