@@ -369,7 +369,7 @@ func VerifyWitness(tx kv.Tx, block *types.Block, prevHeader *types.Header, fullB
 	receipts := types.Receipts{}
 	vmConfig := vm.Config{}
 
-	if err := core.InitializeBlockExecution(cfg.engine, chainReader, block.Header(), cfg.chainConfig, ibs, st, nil); err != nil {
+	if err := core.InitializeBlockExecution(cfg.engine, chainReader, block.Header(), cfg.chainConfig, ibs, s, nil); err != nil {
 		return nil, err
 	}
 	header := block.Header()
@@ -381,7 +381,7 @@ func VerifyWitness(tx kv.Tx, block *types.Block, prevHeader *types.Header, fullB
 		}
 
 		ibs.SetTxContext(txn.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(cfg.chainConfig, getHashFn, cfg.engine, nil, gp, ibs, st, header, txn, usedGas, usedBlobGas, vmConfig)
+		receipt, _, err := core.ApplyTransaction(cfg.chainConfig, getHashFn, cfg.engine, nil, gp, ibs, s, header, txn, usedGas, usedBlobGas, vmConfig)
 		if err != nil {
 			return nil, fmt.Errorf("tx %x failed: %v", txn.Hash(), err)
 		}
