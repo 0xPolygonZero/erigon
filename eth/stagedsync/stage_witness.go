@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -133,6 +134,7 @@ func SpawnWitnessStage(s *StageState, rootTx kv.RwTx, cfg WitnessCfg, ctx contex
 		trieStateWriter := tds.TrieStateWriter()
 
 		statedb := state.New(tds)
+		statedb.SetDisableBalanceInc(true)
 
 		chainReader := NewChainReaderImpl(cfg.chainConfig, tx, cfg.blockReader, logger)
 		if err := core.InitializeBlockExecution(cfg.engine, chainReader, block.Header(), cfg.chainConfig, statedb, trieStateWriter, nil); err != nil {
@@ -148,7 +150,7 @@ func SpawnWitnessStage(s *StageState, rootTx kv.RwTx, cfg WitnessCfg, ctx contex
 		}
 		getHashFn := core.GetHashFn(block.Header(), getHeader)
 
-		w, err := GenerateWitness(tx, block, prevHeader, tds, trieStateWriter, statedb, getHashFn, &cfg, false, ctx, logger)
+		w, txTds, err := GenerateWitness(tx, block, prevHeader, true, 0, tds, trieStateWriter, statedb, getHashFn, &cfg, false, ctx, logger)
 		if err != nil {
 			return err
 		}
@@ -162,7 +164,7 @@ func SpawnWitnessStage(s *StageState, rootTx kv.RwTx, cfg WitnessCfg, ctx contex
 			return err
 		}
 
-		err = VerifyWitness(tx, block, prevHeader, chainReader, tds, getHashFn, &cfg, &buf, logger)
+		_, err = VerifyWitness(tx, block, prevHeader, true, 0, chainReader, tds, txTds, getHashFn, &cfg, &buf, logger)
 		if err != nil {
 			return fmt.Errorf("error verifying witness for block %d: %v", blockNr, err)
 		}
@@ -239,7 +241,7 @@ func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr uint64
 	return batch, rl, nil
 }
 
-func GenerateWitness(tx kv.Tx, block *types.Block, prevHeader *types.Header, tds *state.TrieDbState, trieStateWriter *state.TrieStateWriter, statedb *state.IntraBlockState, getHashFn func(n uint64) libcommon.Hash, cfg *WitnessCfg, regenerateHash bool, ctx context.Context, logger log.Logger) (*trie.Witness, error) {
+func GenerateWitness(tx kv.Tx, block *types.Block, prevHeader *types.Header, fullBlock bool, txIndex uint64, tds *state.TrieDbState, trieStateWriter *state.TrieStateWriter, statedb *state.IntraBlockState, getHashFn func(n uint64) libcommon.Hash, cfg *WitnessCfg, regenerateHash bool, ctx context.Context, logger log.Logger) (*trie.Witness, *state.TrieDbState, error) {
 	blockNr := block.NumberU64()
 	usedGas := new(uint64)
 	usedBlobGas := new(uint64)
@@ -251,33 +253,6 @@ func GenerateWitness(tx kv.Tx, block *types.Block, prevHeader *types.Header, tds
 	}
 
 	vmConfig := vm.Config{}
-
-	for i, txn := range block.Transactions() {
-		statedb.SetTxContext(txn.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(cfg.chainConfig, getHashFn, cfg.engine, nil, gp, statedb, trieStateWriter, block.Header(), txn, usedGas, usedBlobGas, vmConfig)
-		if err != nil {
-			return nil, err
-		}
-
-		if !cfg.chainConfig.IsByzantium(block.NumberU64()) {
-			tds.StartNewBuffer()
-		}
-
-		receipts = append(receipts, receipt)
-	}
-
-	if _, _, _, err := cfg.engine.FinalizeAndAssemble(cfg.chainConfig, block.Header(), statedb, block.Transactions(), block.Uncles(), receipts, block.Withdrawals(), nil, nil, nil, nil); err != nil {
-		fmt.Printf("Finalize of block %d failed: %v\n", blockNr, err)
-		return nil, err
-	}
-
-	statedb.FinalizeTx(cfg.chainConfig.Rules(block.NumberU64(), block.Header().Time), trieStateWriter)
-
-	triePreroot := tds.LastRoot()
-
-	if !bytes.Equal(prevHeader.Root[:], triePreroot[:]) {
-		return nil, fmt.Errorf("mismatch in expected state root computed %v vs %v indicates bug in witness implementation", prevHeader.Root, triePreroot)
-	}
 
 	loadFunc := func(loader *trie.SubTrieLoader, rl *trie.RetainList, dbPrefixes [][]byte, fixedbits []int, accountNibbles [][]byte) (trie.SubTries, error) {
 		rl.Rewind()
@@ -315,31 +290,78 @@ func GenerateWitness(tx kv.Tx, block *types.Block, prevHeader *types.Header, tds
 		return subTries, nil
 	}
 
+	var txTds *state.TrieDbState
+
+	for i, txn := range block.Transactions() {
+		statedb.SetTxContext(txn.Hash(), block.Hash(), i)
+
+		// Ensure that the access list is loaded into witness
+		for _, a := range txn.GetAccessList() {
+			statedb.GetBalance(a.Address)
+
+			for _, k := range a.StorageKeys {
+				v := uint256.NewInt(0)
+				statedb.GetState(a.Address, &k, v)
+			}
+		}
+
+		receipt, _, err := core.ApplyTransaction(cfg.chainConfig, getHashFn, cfg.engine, nil, gp, statedb, trieStateWriter, block.Header(), txn, usedGas, usedBlobGas, vmConfig)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		if !fullBlock && i == int(txIndex) {
+			txTds = tds.WithLastBuffer()
+			break
+		}
+
+		if !cfg.chainConfig.IsByzantium(block.NumberU64()) || (!fullBlock && i+1 == int(txIndex)) {
+			tds.StartNewBuffer()
+		}
+
+		receipts = append(receipts, receipt)
+	}
+
+	if fullBlock {
+		if _, _, _, err := cfg.engine.FinalizeAndAssemble(cfg.chainConfig, block.Header(), statedb, block.Transactions(), block.Uncles(), receipts, block.Withdrawals(), nil, nil, nil, nil); err != nil {
+			fmt.Printf("Finalize of block %d failed: %v\n", blockNr, err)
+			return nil, nil, err
+		}
+
+		statedb.FinalizeTx(cfg.chainConfig.Rules(block.NumberU64(), block.Header().Time), trieStateWriter)
+	}
+
+	triePreroot := tds.LastRoot()
+
+	if fullBlock && !bytes.Equal(prevHeader.Root[:], triePreroot[:]) {
+		return nil, nil, fmt.Errorf("mismatch in expected state root computed %v vs %v indicates bug in witness implementation", prevHeader.Root, triePreroot)
+	}
+
 	if err := tds.ResolveStateTrieWithFunc(loadFunc); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	w, err := tds.ExtractWitness(false, false)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return w, nil
+	return w, txTds, nil
 }
 
-func VerifyWitness(tx kv.Tx, block *types.Block, prevHeader *types.Header, chainReader *ChainReaderImpl, tds *state.TrieDbState, getHashFn func(n uint64) libcommon.Hash, cfg *WitnessCfg, buf *bytes.Buffer, logger log.Logger) error {
+func VerifyWitness(tx kv.Tx, block *types.Block, prevHeader *types.Header, fullBlock bool, txIndex uint64, chainReader *ChainReaderImpl, tds *state.TrieDbState, txTds *state.TrieDbState, getHashFn func(n uint64) libcommon.Hash, cfg *WitnessCfg, buf *bytes.Buffer, logger log.Logger) (*bytes.Buffer, error) {
 	blockNr := block.NumberU64()
 	nw, err := trie.NewWitnessFromReader(bytes.NewReader(buf.Bytes()), false)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	st, err := state.NewStateless(prevHeader.Root, nw, blockNr-1, false, false /* is binary */)
+	s, err := state.NewStateless(prevHeader.Root, nw, blockNr-1, false, false /* is binary */)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	ibs := state.New(st)
-	st.SetBlockNr(blockNr)
+	ibs := state.New(s)
+	s.SetBlockNr(blockNr)
 
 	gp := new(core.GasPool).AddGas(block.GasLimit()).AddBlobGas(cfg.chainConfig.GetMaxBlobGasPerBlock())
 	usedGas := new(uint64)
@@ -348,69 +370,102 @@ func VerifyWitness(tx kv.Tx, block *types.Block, prevHeader *types.Header, chain
 	vmConfig := vm.Config{}
 
 	if err := core.InitializeBlockExecution(cfg.engine, chainReader, block.Header(), cfg.chainConfig, ibs, st, nil); err != nil {
-		return err
+		return nil, err
 	}
 	header := block.Header()
 
 	for i, txn := range block.Transactions() {
+		if !fullBlock && i == int(txIndex) {
+			s.Finalize()
+			break
+		}
+
 		ibs.SetTxContext(txn.Hash(), block.Hash(), i)
 		receipt, _, err := core.ApplyTransaction(cfg.chainConfig, getHashFn, cfg.engine, nil, gp, ibs, st, header, txn, usedGas, usedBlobGas, vmConfig)
 		if err != nil {
-			return fmt.Errorf("tx %x failed: %v", txn.Hash(), err)
+			return nil, fmt.Errorf("tx %x failed: %v", txn.Hash(), err)
 		}
 		receipts = append(receipts, receipt)
 	}
 
+	if !fullBlock {
+		err = txTds.ResolveStateTrieWithFunc(
+			func(loader *trie.SubTrieLoader, rl *trie.RetainList, dbPrefixes [][]byte, fixedbits []int, accountNibbles [][]byte) (trie.SubTries, error) {
+				return trie.SubTries{}, nil
+			},
+		)
+
+		if err != nil {
+			return nil, err
+		}
+
+		rl := txTds.GetRetainList()
+
+		w, err := s.GetTrie().ExtractWitness(false, rl)
+
+		if err != nil {
+			return nil, err
+		}
+
+		var buf bytes.Buffer
+		_, err = w.WriteInto(&buf)
+		if err != nil {
+			return nil, err
+		}
+
+		return &buf, nil
+	}
+
 	receiptSha := types.DeriveSha(receipts)
 	if !vmConfig.StatelessExec && cfg.chainConfig.IsByzantium(block.NumberU64()) && !vmConfig.NoReceipts && receiptSha != block.ReceiptHash() {
-		return fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), receiptSha.Hex(), block.ReceiptHash().Hex())
+		return nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), receiptSha.Hex(), block.ReceiptHash().Hex())
 	}
 
 	if !vmConfig.StatelessExec && *usedGas != header.GasUsed {
-		return fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
+		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
 	}
 
 	if header.BlobGasUsed != nil && *usedBlobGas != *header.BlobGasUsed {
-		return fmt.Errorf("blob gas used by execution: %d, in header: %d", *usedBlobGas, *header.BlobGasUsed)
+		return nil, fmt.Errorf("blob gas used by execution: %d, in header: %d", *usedBlobGas, *header.BlobGasUsed)
 	}
 
 	var bloom types.Bloom
 	if !vmConfig.NoReceipts {
 		bloom = types.CreateBloom(receipts)
 		if !vmConfig.StatelessExec && bloom != header.Bloom {
-			return fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
+			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
 		}
 	}
 
 	if !vmConfig.ReadOnly {
 		_, _, _, err := cfg.engine.FinalizeAndAssemble(cfg.chainConfig, block.Header(), ibs, block.Transactions(), block.Uncles(), receipts, block.Withdrawals(), nil, nil, nil, nil)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		rules := cfg.chainConfig.Rules(block.NumberU64(), header.Time)
 
-		ibs.FinalizeTx(rules, st)
+		ibs.FinalizeTx(rules, s)
 
-		if err := ibs.CommitBlock(rules, st); err != nil {
-			return fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
+		if err := ibs.CommitBlock(rules, s); err != nil {
+			return nil, fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
 		}
 	}
 
-	if err = st.CheckRoot(header.Root); err != nil {
-		return err
+	if err = s.CheckRoot(header.Root); err != nil {
+		return nil, err
 	}
 
 	roots, err := tds.UpdateStateTrie()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if roots[len(roots)-1] != block.Root() {
-		return fmt.Errorf("mismatch in expected state root computed %v vs %v indicates bug in witness implementation", roots[len(roots)-1], block.Root())
+		return nil, fmt.Errorf("mismatch in expected state root computed %v vs %v indicates bug in witness implementation", roots[len(roots)-1], block.Root())
 	}
 
-	return nil
+	return buf, nil
 }
 
 // TODO: Implement

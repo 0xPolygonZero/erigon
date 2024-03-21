@@ -83,3 +83,20 @@ func (rlb *RetainListBuilder) Build(isBinary bool) *RetainList {
 
 	return rl
 }
+
+func (rlb *RetainListBuilder) Copy() *RetainListBuilder {
+	rlbCopy := NewRetainListBuilder()
+	for _, touch := range rlb.touches {
+		rlbCopy.AddTouch(touch)
+	}
+	for _, touch := range rlb.storageTouches {
+		rlbCopy.AddStorageTouch(touch)
+	}
+	for codeHash := range rlb.proofCodes {
+		rlbCopy.ReadCode(codeHash)
+	}
+	for codeHash := range rlb.createdCodes {
+		rlbCopy.CreateCode(codeHash)
+	}
+	return rlbCopy
+}

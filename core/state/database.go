@@ -361,6 +361,33 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 	return t
 }
 
+func (tds *TrieDbState) WithLastBuffer() *TrieDbState {
+	tds.tMu.Lock()
+	aggregateBuffer := &Buffer{}
+	aggregateBuffer.initialise()
+	currentBuffer := tds.currentBuffer
+	buffers := []*Buffer{currentBuffer}
+	tds.tMu.Unlock()
+
+	return &TrieDbState{
+		t:                 tds.t,
+		tMu:               tds.tMu,
+		db:                tds.db,
+		blockNr:           tds.getBlockNr(),
+		buffers:           buffers,
+		aggregateBuffer:   aggregateBuffer,
+		currentBuffer:     currentBuffer,
+		historical:        tds.historical,
+		noHistory:         tds.noHistory,
+		resolveReads:      tds.resolveReads,
+		retainListBuilder: tds.retainListBuilder.Copy(),
+		tp:                tds.tp,
+		pw:                tds.pw,
+		hashBuilder:       trie.NewHashBuilder(false),
+		incarnationMap:    make(map[common.Address]uint64),
+	}
+}
+
 func (tds *TrieDbState) LastRoot() common.Hash {
 	if tds == nil || tds.tMu == nil {
 		return common.Hash{}
@@ -386,7 +413,7 @@ func (tds *TrieDbState) UpdateStateTrie() ([]common.Hash, error) {
 	defer tds.tMu.Unlock()
 
 	roots, err := tds.updateTrieRoots(true)
-	tds.clearUpdates()
+	tds.ClearUpdates()
 	return roots, err
 }
 
@@ -648,6 +675,10 @@ func (tds *TrieDbState) ExtractTouches() (accountTouches [][]byte, storageTouche
 	return tds.retainListBuilder.ExtractTouches()
 }
 
+func (tds *TrieDbState) GetRetainList() *trie.RetainList {
+	return tds.retainListBuilder.Build(false)
+}
+
 func (tds *TrieDbState) ResolveStateTrieWithFunc(loadFunc trie.LoadFunc) error {
 	// Aggregating the current buffer, if any
 	if tds.currentBuffer != nil {
@@ -872,7 +903,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 	return roots, nil
 }
 
-func (tds *TrieDbState) clearUpdates() {
+func (tds *TrieDbState) ClearUpdates() {
 	tds.buffers = nil
 	tds.currentBuffer = nil
 	tds.aggregateBuffer = nil
@@ -887,125 +918,7 @@ func (tds *TrieDbState) GetBlockNr() uint64 {
 	return tds.getBlockNr()
 }
 
-func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
-	//fmt.Printf("Unwind from block %d to block %d\n", tds.blockNr, blockNr)
-	// tds.StartNewBuffer()
-	// b := tds.currentBuffer
-
-	// accountMap, storageMap, err := changeset.RewindData(tds.db, tds.blockNr, blockNr, nil)
-	// if err != nil {
-	// 	return err
-	// }
-	// for plainKey, value := range accountMap {
-	// 	var addrHash, err = common.HashData([]byte(plainKey))
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	if len(value) > 0 {
-	// 		var acc accounts.Account
-	// 		if err := acc.DecodeForStorage(value); err != nil {
-	// 			return err
-	// 		}
-	// 		// Fetch the code hash
-	// 		if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-	// 			if codeHash, err := tds.db.GetOne(kv.ContractCode, dbutils.GenerateStoragePrefix(addrHash[:], acc.Incarnation)); err == nil {
-	// 				copy(acc.CodeHash[:], codeHash)
-	// 			}
-	// 		}
-	// 		b.accountUpdates[addrHash] = &acc
-	// 		if err := rawdb.WriteAccount(tds.db, addrHash, acc); err != nil {
-	// 			return err
-	// 		}
-	// 		b.accountReadsIncarnation[addrHash] = acc.Incarnation
-	// 	} else {
-	// 		b.accountUpdates[addrHash] = nil
-	// 		if err := rawdb.DeleteAccount(tds.db, addrHash); err != nil {
-	// 			return err
-	// 		}
-	// 	}
-	// 	b.accountReads[addrHash] = struct{}{}
-	// }
-	// for plainKey, value := range storageMap {
-	// 	addrHash, hashErr := common.HashData([]byte(plainKey)[:length.Addr])
-	// 	if hashErr != nil {
-	// 		return hashErr
-	// 	}
-	// 	var key = append(addrHash[:], []byte(plainKey)[length.Addr:]...)
-	// 	var keyHash common.Hash
-	// 	copy(keyHash[:], []byte(key)[length.Hash+length.Incarnation:])
-	// 	m, ok := b.storageUpdates[addrHash]
-	// 	if !ok {
-	// 		m = make(map[common.Hash][]byte)
-	// 		b.storageUpdates[addrHash] = m
-	// 	}
-	// 	b.storageIncarnation[addrHash] = binary.BigEndian.Uint64(key[length.Hash:])
-	// 	var storageKey common.StorageKey
-	// 	copy(storageKey[:], []byte(key))
-	// 	b.storageReads[storageKey] = struct{}{}
-	// 	if len(value) > 0 {
-	// 		m[keyHash] = value
-	// 		if err := tds.db.Put(kv.HashedStorage, key[:length.Hash+length.Incarnation+length.Hash], value); err != nil {
-	// 			return err
-	// 		}
-	// 	} else {
-	// 		m[keyHash] = nil
-	// 		if err := tds.db.Delete(kv.HashedStorage, key[:length.Hash+length.Incarnation+length.Hash]); err != nil {
-	// 			return err
-	// 		}
-	// 	}
-	// }
-	// if _, err := tds.ResolveStateTrie(false, false); err != nil {
-	// 	return err
-	// }
-
-	// tds.tMu.Lock()
-	// defer tds.tMu.Unlock()
-	// if _, err := tds.updateTrieRoots(false); err != nil {
-	// 	return err
-	// }
-	// for i := tds.blockNr; i > blockNr; i-- {
-	// 	if err := tds.deleteTimestamp(i); err != nil {
-	// 		return err
-	// 	}
-	// }
-	// if err := tds.truncateHistory(blockNr, accountMap, storageMap); err != nil {
-	// 	return err
-	// }
-	// tds.clearUpdates()
-	// tds.setBlockNr(blockNr)
-	return nil
-}
-
-// func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
-// 	changeSetKey := dbutils.EncodeBlockNumber(timestamp)
-// 	err := tds.db.Walk(kv.AccountChangeSet, changeSetKey, 8*8, func(k, v []byte) (bool, error) {
-// 		if err := tds.db.Delete(kv.AccountChangeSet, k); err != nil {
-// 			return false, err
-// 		}
-// 		return true, nil
-// 	})
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	err = tds.db.Walk(kv.StorageChangeSet, changeSetKey, 8*8, func(k, v []byte) (bool, error) {
-// 		if err2 := tds.db.Delete(kv.StorageChangeSet, k); err2 != nil {
-// 			return false, err2
-// 		}
-// 		return true, nil
-// 	})
-// 	if err != nil {
-// 		return err
-// 	}
-// 	return nil
-// }
-
 func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.Account, error) {
-	if acc, ok := tds.GetAccount(addrHash); ok {
-		return acc, nil
-	}
-
-	// Not present in the trie, try the database
 	var a accounts.Account
 	// addr := common.BytesToAddress(addrHash[:])
 	if ok, err := rawdb.ReadAccountByHash(tds.db, addrHash, &a); err != nil {
@@ -1031,16 +944,20 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 		return nil, err
 	}
 
-	if tds.stateReader != nil {
-		account, err = tds.stateReader.ReadAccountData(address)
+	account, ok := tds.GetAccount(addrHash)
 
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		account, err = tds.readAccountDataByHash(addrHash)
-		if err != nil {
-			return nil, err
+	if !ok {
+		if tds.stateReader != nil {
+			account, err = tds.stateReader.ReadAccountData(address)
+
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			account, err = tds.readAccountDataByHash(addrHash)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -1084,28 +1001,33 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 		tds.currentBuffer.storageReads[storageKey] = struct{}{}
 	}
 
-	if tds.stateReader != nil {
-		enc, err := tds.stateReader.ReadAccountStorage(address, incarnation, key)
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
+	enc, ok := tds.t.Get(dbutils.GenerateCompositeTrieKey(addrHash, seckey))
 
-		if err != nil {
-			return nil, err
-		}
+	if !ok {
+		if tds.stateReader != nil {
+			enc, err := tds.stateReader.ReadAccountStorage(address, incarnation, key)
 
-		return enc, nil
-	} else {
-		tds.tMu.Lock()
-		defer tds.tMu.Unlock()
-		enc, ok := tds.t.Get(dbutils.GenerateCompositeTrieKey(addrHash, seckey))
-		if !ok {
-			// Not present in the trie, try database
-			enc, err = tds.db.GetOne(kv.HashedAccounts, dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey))
 			if err != nil {
-				enc = nil
+				return nil, err
 			}
-		}
 
-		return enc, nil
+			return enc, nil
+		} else {
+			if !ok {
+				// Not present in the trie, try database
+				enc, err = tds.db.GetOne(kv.HashedAccounts, dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey))
+				if err != nil {
+					enc = nil
+				}
+			}
+
+			return enc, nil
+		}
 	}
+
+	return enc, nil
 }
 
 func (tds *TrieDbState) readAccountCodeFromTrie(addrHash []byte) ([]byte, bool) {
@@ -1165,6 +1087,9 @@ func (tds *TrieDbState) ReadAccountCodeSize(address common.Address, incarnation 
 	} else {
 		if tds.stateReader != nil {
 			codeSize, err = tds.stateReader.ReadAccountCodeSize(address, incarnation, codeHash)
+			if err != nil {
+				return 0, err
+			}
 		} else {
 			var code []byte
 			code, err = tds.db.GetOne(kv.Code, codeHash[:])

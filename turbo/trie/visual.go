@@ -66,6 +66,29 @@ func Visual(t *Trie, w io.Writer, opts *VisualOpts) {
 	}
 }
 
+func VisualNode(nd node, w io.Writer, opts *VisualOpts) {
+	var leaves map[string]struct{}
+	if opts.Values {
+		leaves = make(map[string]struct{})
+	}
+	hashes := make(map[string]struct{})
+	visualNode(nd, []byte{}, w, opts.Highlights, opts, leaves, hashes)
+	if opts.SameLevel {
+		fmt.Fprintf(w, "{rank = same;")
+		for leaf := range leaves {
+			fmt.Fprintf(w, "n_%x;", leaf)
+		}
+		fmt.Fprintf(w, `};
+	   `)
+		fmt.Fprintf(w, "{rank = same;")
+		for hash := range hashes {
+			fmt.Fprintf(w, "n_%x;", hash)
+		}
+		fmt.Fprintf(w, `};
+	   		`)
+	}
+}
+
 func visualNode(nd node, hex []byte, w io.Writer, highlights [][]byte, opts *VisualOpts,
 	leaves map[string]struct{}, hashes map[string]struct{}) {
 	switch n := nd.(type) {

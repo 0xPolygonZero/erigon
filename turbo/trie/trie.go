@@ -136,6 +136,21 @@ func (t *Trie) GetAccount(key []byte) (value *accounts.Account, gotValue bool) {
 	return nil, gotValue
 }
 
+func (t *Trie) GetAccountStorage(key []byte) (value *node, gotValue bool) {
+	if t.root == nil {
+		return nil, true
+	}
+
+	hex := keybytesToHex(key)
+
+	acc, found := t.getAccount(t.root, hex, 0)
+	if acc != nil {
+		return &acc.storage, found
+	}
+
+	return nil, found
+}
+
 func (t *Trie) GetAccountCode(key []byte) (value []byte, gotValue bool) {
 	if t.root == nil {
 		return nil, false

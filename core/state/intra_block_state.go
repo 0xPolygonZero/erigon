@@ -84,11 +84,12 @@ type IntraBlockState struct {
 
 	// Journal of state modifications. This is the backbone of
 	// Snapshot and RevertToSnapshot.
-	journal        *journal
-	validRevisions []revision
-	nextRevisionID int
-	trace          bool
-	balanceInc     map[libcommon.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
+	journal           *journal
+	validRevisions    []revision
+	nextRevisionID    int
+	trace             bool
+	balanceInc        map[libcommon.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
+	disableBalanceInc bool                                   // Disable balance increase tracking and eagerly read accounts
 }
 
 // Create a new state from a given trie
@@ -108,6 +109,10 @@ func New(stateReader StateReader) *IntraBlockState {
 
 func (sdb *IntraBlockState) SetTrace(trace bool) {
 	sdb.trace = trace
+}
+
+func (sdb *IntraBlockState) SetDisableBalanceInc(disable bool) {
+	sdb.disableBalanceInc = disable
 }
 
 // setErrorUnsafe sets error but should be called in medhods that already have locks
@@ -304,24 +309,27 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 	if sdb.trace {
 		fmt.Printf("AddBalance %x, %d\n", addr, amount)
 	}
-	// If this account has not been read, add to the balance increment map
-	_, needAccount := sdb.stateObjects[addr]
-	if !needAccount && addr == ripemd && amount.IsZero() {
-		needAccount = true
-	}
-	if !needAccount {
-		sdb.journal.append(balanceIncrease{
-			account:  &addr,
-			increase: *amount,
-		})
-		bi, ok := sdb.balanceInc[addr]
-		if !ok {
-			bi = &BalanceIncrease{}
-			sdb.balanceInc[addr] = bi
+
+	if !sdb.disableBalanceInc {
+		// If this account has not been read, add to the balance increment map
+		_, needAccount := sdb.stateObjects[addr]
+		if !needAccount && addr == ripemd && amount.IsZero() {
+			needAccount = true
 		}
-		bi.increase.Add(&bi.increase, amount)
-		bi.count++
-		return
+		if !needAccount {
+			sdb.journal.append(balanceIncrease{
+				account:  &addr,
+				increase: *amount,
+			})
+			bi, ok := sdb.balanceInc[addr]
+			if !ok {
+				bi = &BalanceIncrease{}
+				sdb.balanceInc[addr] = bi
+			}
+			bi.increase.Add(&bi.increase, amount)
+			bi.count++
+			return
+		}
 	}
 
 	stateObject := sdb.GetOrNewStateObject(addr)

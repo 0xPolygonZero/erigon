@@ -12,9 +12,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
 
-	"github.com/ledgerwatch/erigon/cmd/state/stateless"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
@@ -225,13 +223,13 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		var witness_bytes []byte
 
 		// Try read from DB
-		if block.NumberU64() > 0 {
-			witness_bytes, err = stateless.ReadChunks(tx, kv.Witnesses, k)
-		}
+		// if block.NumberU64() > 0 {
+		// 	witness_bytes, err = stateless.ReadChunks(tx, kv.Witnesses, k)
+		// }
 
 		// If not found, compute witness directly
 		if len(witness_bytes) == 0 || err != nil {
-			witness_bytes, err = api.getWitness(ctx, api.db, blockNrOrHash, 100000, log.Root())
+			witness_bytes, err = api.getWitness(ctx, api.db, blockNrOrHash, 0, true, 100000, log.Root())
 		}
 
 		if err != nil {

@@ -259,6 +259,22 @@ func (s *Stateless) CreateContract(address common.Address) error {
 
 // CheckRoot finalises the execution of a block and computes the resulting state root
 func (s *Stateless) CheckRoot(expected common.Hash) error {
+	h := s.Finalize()
+	if h != expected {
+		filename := fmt.Sprintf("root_%d.txt", s.blockNr)
+		f, err := os.Create(filename)
+		if err == nil {
+			defer f.Close()
+			s.t.Print(f)
+		}
+		return fmt.Errorf("final root: %x, expected: %x", h, expected)
+	}
+
+	return nil
+}
+
+// Finalize the execution of a block and computes the resulting state root
+func (s *Stateless) Finalize() common.Hash {
 	// The following map is to prevent repeated clearouts of the storage
 	alreadyCreated := make(map[common.Hash]struct{})
 	// New contracts are being created at these addresses. Therefore, we need to clear the storage items
@@ -324,21 +340,13 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 		}
 		s.t.DeleteSubtree(addrHash[:])
 	}
-	myRoot := s.t.Hash()
-	if myRoot != expected {
-		filename := fmt.Sprintf("root_%d.txt", s.blockNr)
-		f, err := os.Create(filename)
-		if err == nil {
-			defer f.Close()
-			s.t.Print(f)
-		}
-		return fmt.Errorf("final root: %x, expected: %x", myRoot, expected)
-	}
+
 	s.storageUpdates = make(map[common.Hash]map[common.Hash][]byte)
 	s.accountUpdates = make(map[common.Hash]*accounts.Account)
 	s.deleted = make(map[common.Hash]struct{})
 	s.created = make(map[common.Hash]struct{})
-	return nil
+
+	return s.t.Hash()
 }
 
 func (s *Stateless) GetTrie() *trie.Trie {
