@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
@@ -229,7 +230,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 
 		preImage := types.TriePreImage{
 			Combined: types.CombinedPreImages{
-				Compact: types.HexBytes(witness_bytes),
+				Compact: hexutility.Bytes(witness_bytes),
 			},
 		}
 
