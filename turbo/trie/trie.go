@@ -56,6 +56,8 @@ type Trie struct {
 	hashMap map[libcommon.Hash]node
 
 	observers *ObserverMux
+
+	strictHash bool // if true, the trie will panic on a hash access
 }
 
 // New creates a trie with an existing root node from db.
@@ -99,6 +101,10 @@ func (t *Trie) AddObserver(observer Observer) {
 	}
 
 	t.observers.AddChild(observer)
+}
+
+func (t *Trie) SetStrictHash(strict bool) {
+	t.strictHash = strict
 }
 
 // Get returns the value for key stored in the trie.
@@ -228,6 +234,9 @@ func (t *Trie) getAccount(origNode node, key []byte, pos int) (value *accountNod
 		child := n.Children[key[pos]]
 		return t.getAccount(child, key, pos+1)
 	case hashNode:
+		if t.strictHash {
+			panic(fmt.Sprintf("missing node %x", n.hash))
+		}
 		return nil, false
 
 	case *accountNode:
@@ -273,6 +282,9 @@ func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue b
 		}
 		return t.get(child, key, pos+1)
 	case hashNode:
+		if t.strictHash {
+			panic(fmt.Sprintf("missing node %x", n.hash))
+		}
 		return n.hash, false
 
 	default:

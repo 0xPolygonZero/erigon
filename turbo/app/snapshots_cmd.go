@@ -15,25 +15,22 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/metrics"
-	"github.com/ledgerwatch/erigon/eth/integrity"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/compress"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/ledgerwatch/erigon-lib/seg"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -41,6 +38,7 @@ import (
 	"github.com/ledgerwatch/erigon/diagnostics"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
+	"github.com/ledgerwatch/erigon/eth/integrity"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
@@ -72,7 +70,7 @@ var snapshotCommand = cli.Command{
 		{
 			Name:   "index",
 			Action: doIndicesCommand,
-			Usage:  "Create all indices for snapshots",
+			Usage:  "Create all missed indices for snapshots. It also removing unsupported versions of existing indices and re-build them",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&SnapshotFromFlag,
@@ -88,7 +86,6 @@ var snapshotCommand = cli.Command{
 				&SnapshotFromFlag,
 				&SnapshotToFlag,
 				&SnapshotEveryFlag,
-				&SnapshotVersionFlag,
 			}),
 		},
 		{
@@ -97,7 +94,6 @@ var snapshotCommand = cli.Command{
 			Usage:  "run erigon in snapshot upload mode (no execution)",
 			Flags: joinFlags(erigoncli.DefaultFlags,
 				[]cli.Flag{
-					&SnapshotVersionFlag,
 					&erigoncli.UploadLocationFlag,
 					&erigoncli.UploadFromFlag,
 					&erigoncli.FrozenBlockLimitFlag,
@@ -191,11 +187,6 @@ var (
 		Usage: "Do operation every N blocks",
 		Value: 1_000,
 	}
-	SnapshotVersionFlag = cli.IntFlag{
-		Name:  "snapshot.version",
-		Usage: "Snapshot files version.",
-		Value: 1,
-	}
 	SnapshotRebuildFlag = cli.BoolFlag{
 		Name:  "rebuild",
 		Usage: "Force rebuild",
@@ -214,8 +205,8 @@ func doIntegrity(cliCtx *cli.Context) error {
 	defer chainDB.Close()
 
 	cfg := ethconfig.NewSnapCfg(true, false, true)
-	chainConfig := fromdb.ChainConfig(chainDB)
-	blockSnaps, borSnaps, blockRetire, agg, err := openSnaps(ctx, cfg, dirs, snapcfg.KnownCfg(chainConfig.ChainName, 0).Version, chainDB, logger)
+
+	blockSnaps, borSnaps, blockRetire, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
@@ -228,7 +219,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 		return err
 	}
 
-	//if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(false); err != nil {
+	//if err := blockReader.IntegrityTxnID(false); err != nil {
 	//	return err
 	//}
 
@@ -242,16 +233,19 @@ func doIntegrity(cliCtx *cli.Context) error {
 func doDiff(cliCtx *cli.Context) error {
 	defer log.Info("Done")
 	srcF, dstF := cliCtx.String("src"), cliCtx.String("dst")
-	src, err := compress.NewDecompressor(srcF)
+	src, err := seg.NewDecompressor(srcF)
 	if err != nil {
 		return err
 	}
 	defer src.Close()
-	dst, err := compress.NewDecompressor(dstF)
+	dst, err := seg.NewDecompressor(dstF)
 	if err != nil {
 		return err
 	}
 	defer dst.Close()
+
+	defer src.EnableReadAhead().DisableReadAhead()
+	defer dst.EnableReadAhead().DisableReadAhead()
 
 	i := 0
 	srcG, dstG := src.MakeGetter(), dst.MakeGetter()
@@ -280,7 +274,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 	}
 	f := args.First()
 
-	decompressor, err := compress.NewDecompressor(f)
+	decompressor, err := seg.NewDecompressor(f)
 	if err != nil {
 		return err
 	}
@@ -325,7 +319,7 @@ func doRam(cliCtx *cli.Context) error {
 	dbg.ReadMemStats(&m)
 	before := m.Alloc
 	logger.Info("RAM before open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-	decompressor, err := compress.NewDecompressor(f)
+	decompressor, err := seg.NewDecompressor(f)
 	if err != nil {
 		return err
 	}
@@ -354,9 +348,13 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 		panic("not implemented")
 	}
 
+	if err := freezeblocks.RemoveIncompatibleIndices(dirs.Snap); err != nil {
+		return err
+	}
+
 	cfg := ethconfig.NewSnapCfg(true, false, true)
 	chainConfig := fromdb.ChainConfig(chainDB)
-	blockSnaps, borSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, snapcfg.KnownCfg(chainConfig.ChainName, 0).Version, chainDB, logger)
+	blockSnaps, borSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 
 	if err != nil {
 		return err
@@ -375,16 +373,16 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	return nil
 }
 
-func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, version uint8, chainDB kv.RwDB, logger log.Logger) (
+func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (
 	blockSnaps *freezeblocks.RoSnapshots, borSnaps *freezeblocks.BorRoSnapshots, br *freezeblocks.BlockRetire, agg *libstate.AggregatorV3, err error,
 ) {
-	blockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, version, logger)
+	blockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, 0, logger)
 	if err = blockSnaps.ReopenFolder(); err != nil {
 		return
 	}
 	blockSnaps.LogStat("open")
 
-	borSnaps = freezeblocks.NewBorRoSnapshots(cfg, dirs.Snap, version, logger)
+	borSnaps = freezeblocks.NewBorRoSnapshots(cfg, dirs.Snap, 0, logger)
 	if err = borSnaps.ReopenFolder(); err != nil {
 		return
 	}
@@ -424,7 +422,7 @@ func doUncompress(cliCtx *cli.Context) error {
 	}
 	f := args.First()
 
-	decompressor, err := compress.NewDecompressor(f)
+	decompressor, err := seg.NewDecompressor(f)
 	if err != nil {
 		return err
 	}
@@ -478,7 +476,7 @@ func doCompress(cliCtx *cli.Context) error {
 	f := args.First()
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	logger.Info("file", "datadir", dirs.DataDir, "f", f)
-	c, err := compress.NewCompressor(ctx, "compress", f, dirs.Tmp, compress.MinPatternScore, estimate.CompressSnapshot.Workers(), log.LvlInfo, logger)
+	c, err := seg.NewCompressor(ctx, "compress", f, dirs.Tmp, seg.MinPatternScore, estimate.CompressSnapshot.Workers(), log.LvlInfo, logger)
 	if err != nil {
 		return err
 	}
@@ -526,16 +524,12 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 	to := cliCtx.Uint64(SnapshotToFlag.Name)
 	every := cliCtx.Uint64(SnapshotEveryFlag.Name)
-	version := uint8(cliCtx.Int(SnapshotVersionFlag.Name))
-	if version != 0 {
-		snapcfg.SnapshotVersion(version)
-	}
 
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 
 	cfg := ethconfig.NewSnapCfg(true, false, true)
-	blockSnaps, borSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, version, db, logger)
+	blockSnaps, borSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, db, logger)
 	if err != nil {
 		return err
 	}
@@ -557,7 +551,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			return err
 		})
 		blockReader, _ := br.IO()
-		from2, to2, ok := freezeblocks.CanRetire(forwardProgress, blockReader.FrozenBlocks())
+		from2, to2, ok := freezeblocks.CanRetire(forwardProgress, blockReader.FrozenBlocks(), nil)
 		if ok {
 			from, to, every = from2, to2, to2-from2
 		}
@@ -676,10 +670,6 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 	erigonInfoGauge := metrics.GetOrCreateGauge(fmt.Sprintf(`erigon_info{version="%s",commit="%s"}`, params.Version, params.GitCommit))
 	erigonInfoGauge.Set(1)
 
-	if version := uint8(cliCtx.Int(SnapshotVersionFlag.Name)); version != 0 {
-		snapcfg.SnapshotVersion(version)
-	}
-
 	nodeCfg := node.NewNodConfigUrfave(cliCtx, logger)
 	if err := datadir.ApplyMigrations(nodeCfg.Dirs); err != nil {
 		return err
@@ -730,12 +720,12 @@ func doBodiesDecrement(cliCtx *cli.Context) error {
 		l = append(l, f)
 	}
 	migrateSingleBody := func(srcF, dstF string) error {
-		src, err := compress.NewDecompressor(srcF)
+		src, err := seg.NewDecompressor(srcF)
 		if err != nil {
 			return err
 		}
 		defer src.Close()
-		dst, err := compress.NewCompressor(ctx, "compress", dstF, dirs.Tmp, compress.MinPatternScore, estimate.CompressSnapshot.Workers(), log.LvlInfo, logger)
+		dst, err := seg.NewCompressor(ctx, "compress", dstF, dirs.Tmp, compress.MinPatternScore, estimate.CompressSnapshot.Workers(), log.LvlInfo, logger)
 		if err != nil {
 			return err
 		}

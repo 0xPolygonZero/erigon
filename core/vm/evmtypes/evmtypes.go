@@ -45,7 +45,6 @@ type TxContext struct {
 	BlobHashes        []common.Hash  // Provides versioned blob hashes for BLOBHASH
 	Txn               types.Transaction
 	CumulativeGasUsed *uint64
-	BlockNum          uint64
 }
 
 type (
@@ -81,6 +80,8 @@ type IntraBlockState interface {
 	GetCommittedState(common.Address, *common.Hash, *uint256.Int)
 	GetState(address common.Address, slot *common.Hash, outValue *uint256.Int)
 	SetState(common.Address, *common.Hash, uint256.Int)
+	HasLiveAccount(addr common.Address) bool
+	HasLiveState(addr common.Address, key *common.Hash) bool
 
 	GetTransientState(addr common.Address, key common.Hash) uint256.Int
 	SetTransientState(addr common.Address, key common.Hash, value uint256.Int)

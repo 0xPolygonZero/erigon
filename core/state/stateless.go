@@ -85,6 +85,10 @@ func (s *Stateless) SetBlockNr(blockNr uint64) {
 	s.blockNr = blockNr
 }
 
+func (s *Stateless) SetStrictHash(strict bool) {
+	s.t.SetStrictHash(strict)
+}
+
 // ReadAccountData is a part of the StateReader interface
 // This implementation attempts to look up account data in the state trie, and fails if it is not found
 func (s *Stateless) ReadAccountData(address common.Address) (*accounts.Account, error) {

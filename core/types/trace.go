@@ -14,8 +14,8 @@ func (b HexBytes) MarshalText() ([]byte, error) {
 }
 
 type ContractCodeUsage struct {
-	Read  *libcommon.Hash `json:"read,omitempty"`
-	Write HexBytes        `json:"write,omitempty"`
+	Read  *libcommon.Hash  `json:"read,omitempty"`
+	Write hexutility.Bytes `json:"write,omitempty"`
 }
 
 type TxnTrace struct {
@@ -29,10 +29,10 @@ type TxnTrace struct {
 }
 
 type TxnMeta struct {
-	ByteCode           HexBytes `json:"byte_code,omitempty"`
-	NewTxnTrieNode     HexBytes `json:"new_txn_trie_node_byte,omitempty"`
-	NewReceiptTrieNode HexBytes `json:"new_receipt_trie_node_byte,omitempty"`
-	GasUsed            uint64   `json:"gas_used,omitempty"`
+	ByteCode           hexutility.Bytes `json:"byte_code,omitempty"`
+	NewTxnTrieNode     hexutility.Bytes `json:"new_txn_trie_node_byte,omitempty"`
+	NewReceiptTrieNode hexutility.Bytes `json:"new_receipt_trie_node_byte,omitempty"`
+	GasUsed            uint64           `json:"gas_used,omitempty"`
 }
 
 type TxnInfo struct {
@@ -43,7 +43,7 @@ type TxnInfo struct {
 type BlockUsedCodeHashes []libcommon.Hash
 
 type CombinedPreImages struct {
-	Compact HexBytes `json:"compact,omitempty"`
+	Compact hexutility.Bytes `json:"compact,omitempty"`
 }
 
 type TriePreImage struct {

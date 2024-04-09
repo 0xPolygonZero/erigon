@@ -874,6 +874,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 		if traceTypeVmTrace {
 			tr.VmTrace = trace.VmTrace
 		}
+		tr.TransactionHash = trace.TransactionHash
 		result[i] = tr
 	}
 
@@ -1130,6 +1131,9 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	parentBlock, err := api.blockWithSenders(dbtx, hash, blockNumber)
 	if err != nil {
 		return nil, nil, err
+	}
+	if parentBlock == nil {
+		return nil, nil, fmt.Errorf("parent block %d(%x) not found", blockNumber, hash)
 	}
 	parentHeader := parentBlock.Header()
 	if parentHeader == nil {

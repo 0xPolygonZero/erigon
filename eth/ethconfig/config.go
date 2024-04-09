@@ -95,6 +95,7 @@ var Defaults = Config{
 		Recommit: 3 * time.Second,
 	},
 	DeprecatedTxPool: DeprecatedDefaultTxPoolConfig,
+	TxPool:           txpoolcfg.DefaultConfig,
 	RPCGasCap:        50000000,
 	GPO:              FullNodeGPO,
 	RPCTxFeeCap:      1, // 1 ether
@@ -274,7 +275,7 @@ type Sync struct {
 
 	BodyCacheLimit             datasize.ByteSize
 	BodyDownloadTimeoutSeconds int // TODO: change to duration
-	PruneLimit                 int //the maxumum records to delete from the DB during pruning
+	PruneLimit                 int //the maximum records to delete from the DB during pruning
 	BreakAfterStage            string
 	LoopBlockLimit             uint
 

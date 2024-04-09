@@ -188,6 +188,11 @@ var (
 		Usage: "Max allowed total number of blobs (within type-3 txs) per account",
 		Value: txpoolcfg.DefaultConfig.BlobSlots,
 	}
+	TxPoolTotalBlobPoolLimit = cli.Uint64Flag{
+		Name:  "txpool.totalblobpoollimit",
+		Usage: "Total limit of number of all blobs in txs within the txpool",
+		Value: txpoolcfg.DefaultConfig.TotalBlobPoolLimit,
+	}
 	TxPoolGlobalSlotsFlag = cli.Uint64Flag{
 		Name:  "txpool.globalslots",
 		Usage: "Maximum number of executable transaction slots for all accounts",
@@ -853,7 +858,7 @@ var (
 		Usage: "Enable Silkworm block execution",
 	}
 	SilkwormRpcDaemonFlag = cli.BoolFlag{
-		Name:  "silkworm.rpcd",
+		Name:  "silkworm.rpc",
 		Usage: "Enable embedded Silkworm RPC daemon",
 	}
 	SilkwormSentryFlag = cli.BoolFlag{
@@ -861,10 +866,9 @@ var (
 		Usage: "Enable embedded Silkworm Sentry service",
 	}
 
-	BeaconAPIFlag = cli.BoolFlag{
+	BeaconAPIFlag = cli.StringSliceFlag{
 		Name:  "beacon.api",
-		Usage: "Enable beacon API",
-		Value: false,
+		Usage: "Enable beacon API (avaiable endpoints: beacon, builder, config, debug, events, node, validator, rewards, lighthouse)",
 	}
 	BeaconApiProtocolFlag = cli.StringFlag{
 		Name:  "beacon.api.protocol",
@@ -906,9 +910,19 @@ var (
 		Usage: "sets whether backfilling is enabled for caplin",
 		Value: false,
 	}
+	CaplinBlobBackfillingFlag = cli.BoolFlag{
+		Name:  "caplin.backfilling.blob",
+		Usage: "sets whether backfilling is enabled for caplin",
+		Value: false,
+	}
+	CaplinDisableBlobPruningFlag = cli.BoolFlag{
+		Name:  "caplin.backfilling.blob.no-pruning",
+		Usage: "disable blob pruning in caplin",
+		Value: false,
+	}
 	CaplinArchiveFlag = cli.BoolFlag{
 		Name:  "caplin.archive",
-		Usage: "enables archival node in caplin (Experimental, does not work)",
+		Usage: "enables archival node in caplin",
 		Value: false,
 	}
 	BeaconApiAllowCredentialsFlag = cli.BoolFlag{
@@ -1389,6 +1403,9 @@ func setTxPool(ctx *cli.Context, fullCfg *ethconfig.Config) {
 	if ctx.IsSet(TxPoolBlobSlotsFlag.Name) {
 		fullCfg.TxPool.BlobSlots = ctx.Uint64(TxPoolBlobSlotsFlag.Name)
 	}
+	if ctx.IsSet(TxPoolTotalBlobPoolLimit.Name) {
+		fullCfg.TxPool.TotalBlobPoolLimit = ctx.Uint64(TxPoolTotalBlobPoolLimit.Name)
+	}
 	if ctx.IsSet(TxPoolGlobalSlotsFlag.Name) {
 		cfg.GlobalSlots = ctx.Uint64(TxPoolGlobalSlotsFlag.Name)
 	}
@@ -1557,8 +1574,12 @@ func setWhitelist(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 }
 
-func setBeaconAPI(ctx *cli.Context, cfg *ethconfig.Config) {
-	cfg.BeaconRouter.Active = ctx.Bool(BeaconAPIFlag.Name)
+func setBeaconAPI(ctx *cli.Context, cfg *ethconfig.Config) error {
+	allowed := ctx.StringSlice(BeaconAPIFlag.Name)
+	if err := cfg.BeaconRouter.UnwrapEndpointsList(allowed); err != nil {
+		return err
+	}
+
 	cfg.BeaconRouter.Protocol = ctx.String(BeaconApiProtocolFlag.Name)
 	cfg.BeaconRouter.Address = fmt.Sprintf("%s:%d", ctx.String(BeaconApiAddrFlag.Name), ctx.Int(BeaconApiPortFlag.Name))
 	cfg.BeaconRouter.ReadTimeTimeout = time.Duration(ctx.Uint64(BeaconApiReadTimeoutFlag.Name)) * time.Second
@@ -1567,10 +1588,15 @@ func setBeaconAPI(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.BeaconRouter.AllowedMethods = ctx.StringSlice(BeaconApiAllowMethodsFlag.Name)
 	cfg.BeaconRouter.AllowedOrigins = ctx.StringSlice(BeaconApiAllowOriginsFlag.Name)
 	cfg.BeaconRouter.AllowCredentials = ctx.Bool(BeaconApiAllowCredentialsFlag.Name)
+	return nil
 }
 
 func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
-	cfg.CaplinConfig.Backfilling = ctx.Bool(CaplinBackfillingFlag.Name) || ctx.Bool(CaplinArchiveFlag.Name)
+	// Caplin's block's backfilling is enabled if any of the following flags are set
+	cfg.CaplinConfig.Backfilling = ctx.Bool(CaplinBackfillingFlag.Name) || ctx.Bool(CaplinArchiveFlag.Name) || ctx.Bool(CaplinBlobBackfillingFlag.Name)
+	// More granularity here.
+	cfg.CaplinConfig.BlobBackfilling = ctx.Bool(CaplinBlobBackfillingFlag.Name)
+	cfg.CaplinConfig.BlobPruningDisabled = ctx.Bool(CaplinDisableBlobPruningFlag.Name)
 	cfg.CaplinConfig.Archive = ctx.Bool(CaplinArchiveFlag.Name)
 }
 
@@ -1635,7 +1661,17 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.SentinelPort = ctx.Uint64(SentinelPortFlag.Name)
 	cfg.ForcePartialCommit = ctx.Bool(ForcePartialCommitFlag.Name)
 
-	cfg.Sync.UseSnapshots = ethconfig.UseSnapshotsByChainName(ctx.String(ChainFlag.Name))
+	chain := ctx.String(ChainFlag.Name) // mainnet by default
+	if ctx.IsSet(NetworkIdFlag.Name) {
+		cfg.NetworkID = ctx.Uint64(NetworkIdFlag.Name)
+		if cfg.NetworkID != 1 && !ctx.IsSet(ChainFlag.Name) {
+			chain = "" // don't default to mainnet if NetworkID != 1
+		}
+	} else {
+		cfg.NetworkID = params.NetworkIDByChainName(chain)
+	}
+
+	cfg.Sync.UseSnapshots = ethconfig.UseSnapshotsByChainName(chain)
 	if ctx.IsSet(SnapshotFlag.Name) { //force override default by cli
 		cfg.Sync.UseSnapshots = ctx.Bool(SnapshotFlag.Name)
 	}
@@ -1662,12 +1698,11 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		}
 		logger.Info("torrent verbosity", "level", lvl.LogString())
 		version := "erigon: " + params.VersionWithCommit(params.GitCommit)
-		chain := ctx.String(ChainFlag.Name)
 		webseedsList := libcommon.CliString2Array(ctx.String(WebSeedsFlag.Name))
 		if known, ok := snapcfg.KnownWebseeds[chain]; ok {
 			webseedsList = append(webseedsList, known...)
 		}
-		cfg.Downloader, err = downloadercfg2.New(cfg.Dirs, version, lvl, downloadRate, uploadRate, ctx.Int(TorrentPortFlag.Name), ctx.Int(TorrentConnsPerFileFlag.Name), ctx.Int(TorrentDownloadSlotsFlag.Name), ctx.StringSlice(TorrentDownloadSlotsFlag.Name), webseedsList, chain)
+		cfg.Downloader, err = downloadercfg2.New(cfg.Dirs, version, lvl, downloadRate, uploadRate, ctx.Int(TorrentPortFlag.Name), ctx.Int(TorrentConnsPerFileFlag.Name), ctx.Int(TorrentDownloadSlotsFlag.Name), ctx.StringSlice(TorrentDownloadSlotsFlag.Name), webseedsList, chain, true)
 		if err != nil {
 			panic(err)
 		}
@@ -1693,15 +1728,14 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setWhitelist(ctx, cfg)
 	setBorConfig(ctx, cfg)
 	setSilkworm(ctx, cfg)
-	setBeaconAPI(ctx, cfg)
+	if err := setBeaconAPI(ctx, cfg); err != nil {
+		log.Error("Failed to set beacon API", "err", err)
+	}
 	setCaplin(ctx, cfg)
 	setWitness(ctx, cfg)
 
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 	cfg.HistoryV3 = ctx.Bool(HistoryV3Flag.Name)
-	if ctx.IsSet(NetworkIdFlag.Name) {
-		cfg.NetworkID = ctx.Uint64(NetworkIdFlag.Name)
-	}
 
 	if ctx.IsSet(RPCGlobalGasCapFlag.Name) {
 		cfg.RPCGasCap = ctx.Uint64(RPCGlobalGasCapFlag.Name)
@@ -1724,9 +1758,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			cfg.EthDiscoveryURLs = libcommon.CliString2Array(urls)
 		}
 	}
-	// Override any default configs for hard coded networks.
-	chain := ctx.String(ChainFlag.Name)
 
+	// Override any default configs for hard coded networks.
 	switch chain {
 	default:
 		genesis := core.GenesisBlockByChainName(chain)
@@ -1736,19 +1769,12 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			return
 		}
 		cfg.Genesis = genesis
-		if !ctx.IsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = params.NetworkIDByChainName(chain)
-		}
 		SetDNSDiscoveryDefaults(cfg, *genesisHash)
 	case "":
 		if cfg.NetworkID == 1 {
 			SetDNSDiscoveryDefaults(cfg, params.MainnetGenesisHash)
 		}
 	case networkname.DevChainName:
-		if !ctx.IsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = params.NetworkIDByChainName(chain)
-		}
-
 		// Create new developer account or reuse existing one
 		developer := cfg.Miner.Etherbase
 		if developer == (libcommon.Address{}) {

@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -1337,6 +1338,78 @@ func TestGetStateFromWitness(t *testing.T) {
 	balance := ibs.GetBalance(libcommon.HexToAddress("0x85da99c8a7c2c95964c8efd687e95e632fc533d6"))
 
 	fmt.Printf("Balance: %s\n", balance)
+}
+
+func TestValidateZeroTracer(t *testing.T) {
+	// Load a block trace from a file
+	d, err := os.ReadFile("testdata/blockZeroTrace.json")
+	if err != nil {
+		t.Fatalf("error reading trace: %v", err)
+	}
+
+	// Decode data into json
+	var trace types.BlockTrace
+	err = json.Unmarshal(d, &trace)
+	if err != nil {
+		t.Fatalf("error decoding trace: %v", err)
+	}
+
+	witness, err := trie.NewWitnessFromReader(bytes.NewReader(trace.TriePreImage.Combined.Compact), false)
+
+	if err != nil {
+		t.Fatalf("error reading witness: %v", err)
+	}
+
+	s, err := state.NewStateless(libcommon.Hash{}, witness, 0, false, true)
+
+	if err != nil {
+		t.Fatalf("error creating state: %v", err)
+	}
+
+	s.SetStrictHash(true)
+
+	ibs := state.New(s)
+
+	for _, txnInfo := range trace.TxnInfo {
+		for addr, accTrace := range txnInfo.Traces {
+			ibs.GetBalance(addr)
+
+			if accTrace.Balance != nil {
+				ibs.SetBalance(addr, accTrace.Balance)
+			}
+
+			if accTrace.Nonce != nil {
+				ibs.SetNonce(addr, accTrace.Nonce.Uint64())
+			}
+
+			if accTrace.CodeUsage != nil {
+				if accTrace.CodeUsage.Read != nil {
+					ibs.GetCode(addr)
+				}
+
+				if accTrace.CodeUsage.Write != nil {
+					ibs.SetCode(addr, accTrace.CodeUsage.Write)
+				}
+			}
+
+			if accTrace.SelfDestructed != nil && *accTrace.SelfDestructed {
+				ibs.Selfdestruct(addr)
+			}
+
+			for _, r := range accTrace.StorageRead {
+				var value uint256.Int
+				ibs.GetState(addr, &r, &value)
+			}
+
+			for k, v := range accTrace.StorageWritten {
+				ibs.SetState(addr, &k, *v)
+			}
+		}
+
+		ibs.FinalizeTx(&chain.Rules{}, s)
+	}
+
+	s.Finalize()
 }
 
 func TestTDSWitness(t *testing.T) {
