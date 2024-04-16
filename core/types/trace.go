@@ -7,12 +7,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 )
 
-type HexBytes []byte
-
-func (b HexBytes) MarshalText() ([]byte, error) {
-	return hexutility.Bytes(b[:]).MarshalText()
-}
-
 type ContractCodeUsage struct {
 	Read  *libcommon.Hash  `json:"read,omitempty"`
 	Write hexutility.Bytes `json:"write,omitempty"`
