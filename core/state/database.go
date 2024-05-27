@@ -654,7 +654,7 @@ func (tds *TrieDbState) resolveAccountAndStorageTouches(accountTouches common.Ha
 	}
 	if err := tds.t.HookSubTries(subTries, hooks); err != nil {
 		for i, hash := range subTries.Hashes {
-			log.Error("Info for error", "dbPrefix", fmt.Sprintf("%x", dbPrefixes[i]), "fixedbits", fixedbits[i], "hash", hash)
+			log.Error("Info for error", "dbPrefix", fmt.Sprintf("%x", dbPrefixes[i]), "fixedbits", fixedbits[i], "hash", hash, "err", err)
 		}
 		return err
 	}

@@ -86,9 +86,19 @@ func SpawnWitnessStage(s *StageState, rootTx kv.RwTx, cfg WitnessCfg, ctx contex
 		return nil
 	}
 
+	var from, to uint64
+
+	// Skip witness generation for past blocks. This can happen when we're upgrading
+	// the node to this version having witness stage or when witness stage is disabled
+	// and then enabled again.
+	if lastWitnessBlock == 0 {
+		s.Update(tx, execStageBlock-1)
+		return nil
+	}
+
 	// We'll generate witness for all blocks from `lastWitnessBlock+1` until `execStageBlock - 1`
-	to := execStageBlock - 1
-	from := lastWitnessBlock + 1
+	to = execStageBlock - 1
+	from = lastWitnessBlock + 1
 	if to <= 0 {
 		return nil
 	}
