@@ -26,6 +26,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	common2 "github.com/ledgerwatch/erigon/common"
@@ -61,10 +62,11 @@ type Genesis struct {
 	ParentHash common.Hash `json:"parentHash"`
 
 	// Header fields added in London and later hard forks
-	BaseFee               *big.Int     `json:"baseFeePerGas"`         // EIP-1559
-	BlobGasUsed           *uint64      `json:"blobGasUsed"`           // EIP-4844
-	ExcessBlobGas         *uint64      `json:"excessBlobGas"`         // EIP-4844
-	ParentBeaconBlockRoot *common.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
+	BaseFee               *big.Int        `json:"baseFeePerGas"` // EIP-1559
+	WithdrawalsHash       *libcommon.Hash `json:"withdrawalsRoot"`
+	BlobGasUsed           *uint64         `json:"blobGasUsed"`           // EIP-4844
+	ExcessBlobGas         *uint64         `json:"excessBlobGas"`         // EIP-4844
+	ParentBeaconBlockRoot *common.Hash    `json:"parentBeaconBlockRoot"` // EIP-4788
 }
 
 // GenesisAlloc specifies the initial state that is part of the genesis block.

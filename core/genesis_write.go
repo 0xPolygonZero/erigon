@@ -66,7 +66,7 @@ import (
 //
 // The returned chain configuration is never nil.
 func CommitGenesisBlock(db kv.RwDB, genesis *types.Genesis, tmpDir string, logger log.Logger) (*chain.Config, *types.Block, error) {
-	return CommitGenesisBlockWithOverride(db, genesis, nil, tmpDir, logger)
+	return CommitGenesisBlockWithOverride(db, genesis, big.NewInt(0), tmpDir, logger)
 }
 
 func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, overrideCancunTime *big.Int, tmpDir string, logger log.Logger) (*chain.Config, *types.Block, error) {
