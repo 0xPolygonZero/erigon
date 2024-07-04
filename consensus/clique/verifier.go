@@ -77,9 +77,9 @@ func (c *Clique) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 		}
 	}
 
-	if header.WithdrawalsHash != nil {
-		return consensus.ErrUnexpectedWithdrawals
-	}
+	// if header.WithdrawalsHash != nil {
+	// 	return consensus.ErrUnexpectedWithdrawals
+	// }
 
 	// All basic checks passed, verify cascading fields
 	return c.verifyCascadingFields(chain, header, parents)
@@ -123,9 +123,9 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 		return err
 	}
 
-	if err := misc.VerifyAbsenceOfCancunHeaderFields(header); err != nil {
-		return err
-	}
+	// if err := misc.VerifyAbsenceOfCancunHeaderFields(header); err != nil {
+	// 	return err
+	// }
 
 	// Retrieve the snapshot needed to verify this header and cache it
 	snap, err := c.Snapshot(chain, number-1, header.ParentHash, parents)
