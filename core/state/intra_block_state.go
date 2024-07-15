@@ -260,6 +260,10 @@ func (sdb *IntraBlockState) GetCodeHash(addr libcommon.Address) libcommon.Hash {
 	if stateObject == nil || stateObject.deleted {
 		return libcommon.Hash{}
 	}
+
+	// Plonky2: if the code is not nil, we need to include code in the witness by calling GetCodeSize
+	sdb.GetCodeSize(addr)
+
 	return libcommon.BytesToHash(stateObject.CodeHash())
 }
 
