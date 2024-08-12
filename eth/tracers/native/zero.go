@@ -333,10 +333,6 @@ func (t *zeroTracer) addAccountToTrace(addr libcommon.Address) {
 		return
 	}
 
-	if !t.env.IntraBlockState().HasLiveAccount(addr) {
-		return
-	}
-
 	nonce := uint256.NewInt(t.env.IntraBlockState().GetNonce(addr))
 	codeHash := t.env.IntraBlockState().GetCodeHash(addr)
 
