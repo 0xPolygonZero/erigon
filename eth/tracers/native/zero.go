@@ -347,10 +347,6 @@ func (t *zeroTracer) addAccountToTrace(addr libcommon.Address) {
 }
 
 func (t *zeroTracer) addSLOADToAccount(addr libcommon.Address, key libcommon.Hash) {
-	if !t.env.IntraBlockState().HasLiveState(addr, &key) {
-		return
-	}
-
 	var value uint256.Int
 	t.env.IntraBlockState().GetState(addr, &key, &value)
 	t.tx.Traces[addr].StorageReadMap[key] = struct{}{}
@@ -359,19 +355,11 @@ func (t *zeroTracer) addSLOADToAccount(addr libcommon.Address, key libcommon.Has
 }
 
 func (t *zeroTracer) addSSTOREToAccount(addr libcommon.Address, key libcommon.Hash, value *uint256.Int) {
-	if !t.env.IntraBlockState().HasLiveState(addr, &key) {
-		return
-	}
-
 	t.tx.Traces[addr].StorageWritten[key] = value
 	t.addOpCodeToAccount(addr, vm.SSTORE)
 }
 
 func (t *zeroTracer) addOpCodeToAccount(addr libcommon.Address, op vm.OpCode) {
-	if !t.env.IntraBlockState().HasLiveAccount(addr) {
-		return
-	}
-
 	if t.addrOpCodes[addr] == nil {
 		t.addrOpCodes[addr] = make(map[vm.OpCode]struct{})
 	}
