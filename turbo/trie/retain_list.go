@@ -24,6 +24,7 @@ import (
 	"sort"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -211,6 +212,7 @@ func (pr *DefaultProofRetainer) ProofResult() (*accounts.AccProofResult, error) 
 			// provers will treat the EmptyRoot as a special case and ignore the proof
 			// bytes.
 			result.StorageProof[i].Value = (*hexutil.Big)(new(big.Int))
+			result.StorageProof[i].Proof = make([]hexutility.Bytes, 0)
 			continue
 		}
 
