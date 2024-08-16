@@ -198,7 +198,9 @@ func (t *zeroTracer) CaptureTxEnd(restGas uint64) {
 		if len(trace.StorageReadMap) > 0 && hasLiveAccount {
 			trace.StorageRead = make([]libcommon.Hash, 0, len(trace.StorageReadMap))
 			for k := range trace.StorageReadMap {
-				trace.StorageRead = append(trace.StorageRead, k)
+				if t.env.IntraBlockState().HasLiveState(addr, &k) {
+					trace.StorageRead = append(trace.StorageRead, k)
+				}
 			}
 		} else {
 			trace.StorageRead = nil
@@ -347,10 +349,7 @@ func (t *zeroTracer) addAccountToTrace(addr libcommon.Address) {
 }
 
 func (t *zeroTracer) addSLOADToAccount(addr libcommon.Address, key libcommon.Hash) {
-	var value uint256.Int
-	t.env.IntraBlockState().GetState(addr, &key, &value)
 	t.tx.Traces[addr].StorageReadMap[key] = struct{}{}
-
 	t.addOpCodeToAccount(addr, vm.SLOAD)
 }
 
