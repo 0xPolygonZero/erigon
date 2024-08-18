@@ -27,17 +27,16 @@ func init() {
 }
 
 type zeroTracer struct {
-	noopTracer     // stub struct to mock not used interface methods
-	env            *vm.EVM
-	tx             types.TxnInfo
-	gasLimit       uint64      // Amount of gas bought for the whole tx
-	interrupt      atomic.Bool // Atomic flag to signal execution interruption
-	reason         error       // Textual reason for the interruption
-	ctx            *tracers.Context
-	to             *libcommon.Address
-	txStatus       uint64
-	addrOpCodes    map[libcommon.Address]map[vm.OpCode]struct{}
-	wasLoadedToIBS map[libcommon.Address]bool
+	noopTracer  // stub struct to mock not used interface methods
+	env         *vm.EVM
+	tx          types.TxnInfo
+	gasLimit    uint64      // Amount of gas bought for the whole tx
+	interrupt   atomic.Bool // Atomic flag to signal execution interruption
+	reason      error       // Textual reason for the interruption
+	ctx         *tracers.Context
+	to          *libcommon.Address
+	txStatus    uint64
+	addrOpCodes map[libcommon.Address]map[vm.OpCode]struct{}
 }
 
 func newZeroTracer(ctx *tracers.Context, cfg json.RawMessage) (tracers.Tracer, error) {
@@ -45,9 +44,8 @@ func newZeroTracer(ctx *tracers.Context, cfg json.RawMessage) (tracers.Tracer, e
 		tx: types.TxnInfo{
 			Traces: make(map[libcommon.Address]*types.TxnTrace),
 		},
-		ctx:            ctx,
-		addrOpCodes:    make(map[libcommon.Address]map[vm.OpCode]struct{}),
-		wasLoadedToIBS: make(map[libcommon.Address]bool),
+		ctx:         ctx,
+		addrOpCodes: make(map[libcommon.Address]map[vm.OpCode]struct{}),
 	}, nil
 }
 
@@ -178,8 +176,10 @@ func (t *zeroTracer) CaptureTxEnd(restGas uint64) {
 
 	toDelete := make([]libcommon.Address, 0)
 	for addr := range t.tx.Traces {
+		// Check again if the account was accessed through IntraBlockState
+		seenAccount := t.env.IntraBlockState().SeenAccount(addr)
 		// If an account was never accessed through IntraBlockState, it means that never there was an OpCode that read into it or checks whether it exists in the state trie, and therefore we don't need the trace of it.
-		if _, ok := t.wasLoadedToIBS[addr]; !ok {
+		if !seenAccount {
 			toDelete = append(toDelete, addr)
 			continue
 		}
@@ -344,11 +344,6 @@ func (t *zeroTracer) Stop(err error) {
 }
 
 func (t *zeroTracer) addAccountToTrace(addr libcommon.Address) {
-	hasLiveAccount := t.env.IntraBlockState().HasLiveAccount(addr)
-	if hasLiveAccount {
-		t.wasLoadedToIBS[addr] = true
-	}
-
 	if _, ok := t.tx.Traces[addr]; ok {
 		return
 	}
