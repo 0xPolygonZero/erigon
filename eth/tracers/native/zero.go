@@ -126,7 +126,10 @@ func (t *zeroTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sco
 		t.addAccountToTrace(addr)
 		t.addOpCodeToAccount(addr, op)
 	case op == vm.CREATE:
-		nonce := t.env.IntraBlockState().GetNonce(caller)
+		nonce := uint64(0)
+		if t.env.IntraBlockState().HasLiveAccount(caller) {
+			nonce = t.env.IntraBlockState().GetNonce(caller)
+		}
 		addr := crypto.CreateAddress(caller, nonce)
 		t.addAccountToTrace(addr)
 		t.addOpCodeToAccount(addr, op)
@@ -348,12 +351,19 @@ func (t *zeroTracer) addAccountToTrace(addr libcommon.Address) {
 		return
 	}
 
-	nonce := uint256.NewInt(t.env.IntraBlockState().GetNonce(addr))
-	codeHash := t.env.IntraBlockState().GetCodeHash(addr)
+	balance := uint256.NewInt(0)
+	nonce := uint256.NewInt(0)
+	codeHash := libcommon.Hash{}
+
+	if t.env.IntraBlockState().HasLiveAccount(addr) {
+		nonce = uint256.NewInt(t.env.IntraBlockState().GetNonce(addr))
+		balance = t.env.IntraBlockState().GetBalance(addr)
+		codeHash = t.env.IntraBlockState().GetCodeHash(addr)
+	}
 
 	t.tx.Traces[addr] = &types.TxnTrace{
-		Balance:        t.env.IntraBlockState().GetBalance(addr).Clone(),
-		Nonce:          nonce,
+		Balance:        balance.Clone(),
+		Nonce:          nonce.Clone(),
 		CodeUsage:      &types.ContractCodeUsage{Read: &codeHash},
 		StorageWritten: make(map[libcommon.Hash]*uint256.Int),
 		StorageRead:    make([]libcommon.Hash, 0),
