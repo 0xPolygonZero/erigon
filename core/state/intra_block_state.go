@@ -59,7 +59,7 @@ type IntraBlockState struct {
 	stateObjects      map[libcommon.Address]*stateObject
 	stateObjectsDirty map[libcommon.Address]struct{}
 
-	seenStateObjects map[libcommon.Address]*stateObject // State objects that have been seen at least once
+	seenStateObjects map[libcommon.Address]struct{} // State objects that have been seen at least once
 
 	nilAccounts map[libcommon.Address]struct{} // Remember non-existent account to avoid reading them again
 
@@ -99,7 +99,7 @@ func New(stateReader StateReader) *IntraBlockState {
 	return &IntraBlockState{
 		stateReader:       stateReader,
 		stateObjects:      map[libcommon.Address]*stateObject{},
-		seenStateObjects:  map[libcommon.Address]*stateObject{},
+		seenStateObjects:  map[libcommon.Address]struct{}{},
 		stateObjectsDirty: map[libcommon.Address]struct{}{},
 		nilAccounts:       map[libcommon.Address]struct{}{},
 		logs:              map[libcommon.Hash][]*types.Log{},
@@ -422,10 +422,8 @@ func (sdb *IntraBlockState) HasLiveAccount(addr libcommon.Address) bool {
 }
 
 func (sdb *IntraBlockState) SeenAccount(addr libcommon.Address) bool {
-	if stateObject := sdb.seenStateObjects[addr]; stateObject != nil {
-		return true
-	}
-	return false
+	_, ok := sdb.seenStateObjects[addr]
+	return ok
 }
 
 func (sdb *IntraBlockState) HasLiveState(addr libcommon.Address, key *libcommon.Hash) bool {
@@ -517,6 +515,7 @@ func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (stateObject 
 		return nil
 	}
 	account, err := sdb.stateReader.ReadAccountData(addr)
+	sdb.seenStateObjects[addr] = struct{}{}
 	if err != nil {
 		sdb.setErrorUnsafe(err)
 		return nil
@@ -542,7 +541,7 @@ func (sdb *IntraBlockState) setStateObject(addr libcommon.Address, object *state
 		sdb.journal.append(balanceIncreaseTransfer{bi: bi})
 	}
 	sdb.stateObjects[addr] = object
-	sdb.seenStateObjects[addr] = object
+	sdb.seenStateObjects[addr] = struct{}{}
 }
 
 // Retrieve a state object or create a new state object if nil.
