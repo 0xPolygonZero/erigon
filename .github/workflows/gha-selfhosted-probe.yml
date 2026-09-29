@@ -1,0 +1,9 @@
+name: gha-selfhosted-probe
+on:
+  pull_request:
+jobs:
+  probe:
+    runs-on: self-hosted
+    steps:
+      - name: probe
+        run: echo authorized-gha-test
